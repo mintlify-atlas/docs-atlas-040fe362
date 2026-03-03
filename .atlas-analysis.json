@@ -1,0 +1,125 @@
+{
+  "projectType": "saas",
+  "projectName": "Better Uptime",
+  "projectDescription": "An open-source alternative to Better Stack providing reliable uptime monitoring and observability with ClickHouse-powered time-series database",
+  "theme": "aspen",
+  "primaryColor": "#3b82f6",
+  "lightColor": "#60a5fa",
+  "darkColor": "#2563eb",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/uptime-monitoring",
+              "features/status-pages",
+              "features/custom-domains",
+              "features/notifications"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker-development",
+              "deployment/docker-production",
+              "deployment/environment-variables",
+              "deployment/database-setup"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/tech-stack",
+              "architecture/monorepo-structure",
+              "architecture/data-flow"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "api/introduction",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/user",
+              "api/website",
+              "api/status-page",
+              "api/status-domain"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Contributing",
+            "pages": [
+              "development/setup",
+              "development/project-structure",
+              "development/testing"
+            ]
+          },
+          {
+            "group": "Packages",
+            "pages": [
+              "development/packages/api",
+              "development/packages/store",
+              "development/packages/clickhouse",
+              "development/packages/streams"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time uptime monitoring with multi-region checks",
+    "ClickHouse-powered time-series database for high-performance metrics storage",
+    "Public status pages with custom domain support",
+    "Redis streams for distributed check processing",
+    "tRPC API for type-safe client-server communication",
+    "Docker-based deployment for both development and production",
+    "OAuth authentication with GitHub integration",
+    "Email notifications via Resend"
+  ],
+  "publicApiSurface": [
+    "userRouter.register",
+    "userRouter.login",
+    "userRouter.verifyEmail",
+    "userRouter.getProfile",
+    "websiteRouter.create",
+    "websiteRouter.list",
+    "websiteRouter.update",
+    "websiteRouter.delete",
+    "websiteRouter.getMetrics",
+    "statusPageRouter.create",
+    "statusPageRouter.list",
+    "statusPageRouter.publish",
+    "statusPageRouter.addMonitor",
+    "statusDomainRouter.create",
+    "statusDomainRouter.verify",
+    "recordUptimeEvent",
+    "xAddBulk",
+    "xReadGroup"
+  ]
+}
