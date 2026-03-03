@@ -1,0 +1,121 @@
+---
+title: 'Introduction'
+description: 'Get started with the Better Uptime tRPC API'
+---
+
+## Overview
+
+Better Uptime uses [tRPC](https://trpc.io) for type-safe API communication between the client and server. tRPC provides end-to-end type safety without code generation, making it ideal for full-stack TypeScript applications.
+
+## Key Features
+
+- **Type-safe**: Full TypeScript support with automatic type inference
+- **No code generation**: Types are derived directly from your API implementation
+- **Real-time validation**: Input and output validation using Zod schemas
+- **JWT authentication**: Secure authentication with protected and public procedures
+
+## Available Routers
+
+The API is organized into the following routers:
+
+### User Router
+Handles authentication and user management:
+- User signup and login
+- GitHub OAuth authentication
+- Email verification
+- User profile retrieval
+
+### Website Router
+Manages website monitoring:
+- Create and update monitored websites
+- Retrieve website status and uptime data
+- Delete websites
+
+### Status Page Router
+Manages public status pages:
+- Create and configure status pages
+- Update status page content
+- List and retrieve status pages
+
+### Status Domain Router
+Handles custom domains for status pages:
+- Add custom domains
+- Configure DNS settings
+- Verify domain ownership
+
+## Import Example
+
+All routers and utilities are exported from the `@repo/api` package:
+
+```typescript
+import {
+  router,
+  publicProcedure,
+  protectedProcedure,
+  createContext,
+  userRouter,
+  websiteRouter,
+  statusPageRouter,
+  statusDomainRouter,
+  type Context,
+  type inferRouterInputs,
+  type inferRouterOutputs,
+} from '@repo/api';
+```
+
+## Creating a Router
+
+Routers are created using the `router` function and can include both public and protected procedures:
+
+```typescript
+import { router, publicProcedure, protectedProcedure } from '@repo/api';
+import { z } from 'zod';
+
+export const myRouter = router({
+  // Public endpoint - no authentication required
+  public: publicProcedure
+    .input(z.object({ name: z.string() }))
+    .query(({ input }) => {
+      return { message: `Hello, ${input.name}!` };
+    }),
+
+  // Protected endpoint - requires authentication
+  protected: protectedProcedure
+    .query(({ ctx }) => {
+      return { userId: ctx.user.userId };
+    }),
+});
+```
+
+## Type Inference
+
+Extract input and output types from your routers:
+
+```typescript
+import type { inferRouterInputs, inferRouterOutputs } from '@repo/api';
+import type { userRouter } from '@repo/api';
+
+type UserInput = inferRouterInputs<typeof userRouter>;
+type UserOutput = inferRouterOutputs<typeof userRouter>;
+
+// Use specific procedure types
+type LoginInput = UserInput['login'];
+type LoginOutput = UserOutput['login'];
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn how to authenticate users and protect routes
+  </Card>
+  <Card title="User Router" icon="user" href="/api/user">
+    Explore user management endpoints
+  </Card>
+  <Card title="Website Router" icon="globe" href="/api/website">
+    Monitor websites and track uptime
+  </Card>
+  <Card title="Status Page Router" icon="signal" href="/api/status-page">
+    Create and manage status pages
+  </Card>
+</CardGroup>

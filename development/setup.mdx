@@ -1,0 +1,197 @@
+---
+title: Development Setup
+description: Get your local development environment up and running
+---
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+### Required
+
+- **Node.js** >= 18
+- **pnpm** 9.0.0 (package manager)
+- **Bun** (runtime for server applications)
+- **Git**
+
+### Optional Services
+
+- **Redis** (for streams)
+- **ClickHouse** (for time-series data)
+- **PostgreSQL** (for application data)
+
+Docker configurations are available in the `docker/` directory for running these services locally.
+
+## Clone and Install
+
+### 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd better-uptime
+```
+
+### 2. Install Dependencies
+
+The project uses **pnpm** as the package manager:
+
+```bash
+pnpm install
+```
+
+This will install all dependencies across the monorepo workspaces.
+
+### 3. Environment Configuration
+
+Create `.env` files in the appropriate locations. The project uses these environment variables:
+
+- `PORT` - Server port
+- `JWT_SECRET` - JWT authentication secret
+- `DATABASE_URL` - PostgreSQL connection string
+
+Refer to `.env.example` files in individual apps for complete configuration.
+
+## Development Workflow
+
+### Start Development Servers
+
+Run all applications in development mode:
+
+```bash
+pnpm dev
+```
+
+This starts:
+- **Client** (Next.js) on port 3000
+- **Server** (Bun + tRPC) on configured port
+- **Worker** (background job processor)
+- **Publisher** (event publishing service)
+
+### Start Individual Apps
+
+You can also run specific applications:
+
+```bash
+# Client only
+pnpm --filter client dev
+
+# Server only
+pnpm --filter server dev
+```
+
+### Build for Production
+
+Build all apps and packages:
+
+```bash
+pnpm build
+```
+
+This runs the Turborepo build pipeline with dependency caching.
+
+### Code Quality
+
+#### Linting
+
+Run ESLint across the monorepo:
+
+```bash
+pnpm lint
+```
+
+#### Type Checking
+
+Run TypeScript type checking:
+
+```bash
+pnpm check-types
+```
+
+#### Formatting
+
+Format code with Prettier:
+
+```bash
+pnpm format
+```
+
+### Git Hooks
+
+The project uses **Husky** for Git hooks:
+
+```bash
+pnpm prepare
+```
+
+**lint-staged** automatically runs on pre-commit to:
+- Format changed files
+- Run linting
+- Check types
+
+## Package Scripts Reference
+
+| Script | Description |
+|--------|-------------|
+| `pnpm dev` | Start all apps in development mode |
+| `pnpm build` | Build all apps and packages |
+| `pnpm lint` | Run linting across monorepo |
+| `pnpm format` | Format code with Prettier |
+| `pnpm check-types` | Run TypeScript type checking |
+| `pnpm test` | Run all tests |
+| `pnpm test:watch` | Run tests in watch mode |
+| `pnpm test:coverage` | Run tests with coverage report |
+
+## Development Tips
+
+### Turborepo Caching
+
+Turborepo caches task outputs to speed up builds. To clear the cache:
+
+```bash
+pnpm turbo clean
+```
+
+### Bun Runtime
+
+The server applications use Bun for faster startup and hot reload:
+
+```bash
+bun run --hot src/bin.ts
+```
+
+### Workspace Protocol
+
+The project uses pnpm workspace protocol for internal packages:
+
+```json
+"dependencies": {
+  "@repo/api": "workspace:*"
+}
+```
+
+This ensures packages always reference the local workspace version.
+
+## Troubleshooting
+
+### Port Conflicts
+
+If you encounter port conflicts, update the `PORT` environment variable in your `.env` file.
+
+### Dependency Issues
+
+Clear node_modules and reinstall:
+
+```bash
+rm -rf node_modules
+rm pnpm-lock.yaml
+pnpm install
+```
+
+### Build Errors
+
+Clear Turborepo cache and rebuild:
+
+```bash
+rm -rf .turbo
+pnpm build
+```

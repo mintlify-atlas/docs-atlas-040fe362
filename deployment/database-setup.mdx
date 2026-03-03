@@ -1,0 +1,562 @@
+---
+title: 'Database Setup'
+description: 'Configure PostgreSQL database and run Prisma migrations for Better Uptime'
+---
+
+## Overview
+
+Better Uptime uses PostgreSQL as its primary database and Prisma as the ORM. This guide covers database setup, schema overview, and running migrations.
+
+## Prerequisites
+
+<Check>
+  - PostgreSQL 12 or higher installed
+  - Database user with CREATE DATABASE privileges
+  - Node.js or Bun installed for running Prisma commands
+</Check>
+
+## Database Configuration
+
+### PostgreSQL Setup
+
+<Steps>
+  <Step title="Install PostgreSQL">
+    **Ubuntu/Debian:**
+    ```bash
+    sudo apt update
+    sudo apt install postgresql postgresql-contrib
+    ```
+
+    **macOS (Homebrew):**
+    ```bash
+    brew install postgresql@15
+    brew services start postgresql@15
+    ```
+
+    **Docker:**
+    ```bash
+    docker run --name better-uptime-postgres \
+      -e POSTGRES_PASSWORD=mypassword \
+      -e POSTGRES_DB=better_uptime \
+      -p 5432:5432 \
+      -d postgres:15-alpine
+    ```
+  </Step>
+
+  <Step title="Create Database">
+    Connect to PostgreSQL:
+    ```bash
+    psql -U postgres
+    ```
+
+    Create database and user:
+    ```sql
+    CREATE DATABASE better_uptime;
+    CREATE USER better_uptime_user WITH PASSWORD 'your_secure_password';
+    GRANT ALL PRIVILEGES ON DATABASE better_uptime TO better_uptime_user;
+    ```
+  </Step>
+
+  <Step title="Set Connection String">
+    Add to your `.env` file:
+    ```bash
+    DATABASE_URL=postgresql://better_uptime_user:your_secure_password@localhost:5432/better_uptime
+    ```
+
+    **Format:** `postgresql://[user]:[password]@[host]:[port]/[database]`
+  </Step>
+</Steps>
+
+### Connection String Examples
+
+<CodeGroup>
+
+```bash Local
+DATABASE_URL=postgresql://postgres:password@localhost:5432/better_uptime
+```
+
+```bash Docker (from host)
+DATABASE_URL=postgresql://postgres:password@127.0.0.1:5432/better_uptime
+```
+
+```bash Docker (from container)
+DATABASE_URL=postgresql://postgres:password@postgres:5432/better_uptime
+```
+
+```bash Remote
+DATABASE_URL=postgresql://user:password@db.example.com:5432/better_uptime?sslmode=require
+```
+
+</CodeGroup>
+
+## Prisma Schema Overview
+
+Better Uptime uses Prisma for database management. The schema is located at `packages/store/prisma/schema.prisma`.
+
+### Core Models
+
+<AccordionGroup>
+  <Accordion title="User Model">
+    Stores user account information:
+
+    ```prisma
+    model User {
+      id            String       @id @default(cuid())
+      email         String       @unique
+      passwordHash  String?
+      emailVerified Boolean      @default(false)
+      name          String?
+      avatarUrl     String?
+      isActive      Boolean      @default(true)
+      accounts      Account[]
+      createdAt     DateTime     @default(now())
+      updatedAt     DateTime     @updatedAt
+      website       Website[]
+      statusPages   StatusPage[]
+    }
+    ```
+
+    **Fields:**
+    - `id`: Unique user identifier (CUID)
+    - `email`: Unique email address
+    - `passwordHash`: Hashed password (optional for OAuth users)
+    - `emailVerified`: Email verification status
+    - `name`: Display name
+    - `avatarUrl`: Profile picture URL
+    - `isActive`: Account active status
+  </Accordion>
+
+  <Accordion title="Account Model">
+    Stores OAuth provider accounts:
+
+    ```prisma
+    model Account {
+      id                String  @id @default(cuid())
+      userId            String
+      provider          String
+      providerAccountId String
+      accessToken       String?
+      refreshToken      String?
+      expiresAt         Int?
+      user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+      @@unique([provider, providerAccountId])
+    }
+    ```
+
+    **Purpose:** Links users to OAuth providers (GitHub)
+  </Accordion>
+
+  <Accordion title="Website Model">
+    Stores monitored websites:
+
+    ```prisma
+    model Website {
+      id                 String              @id @default(cuid())
+      url                String
+      name               String?
+      isActive           Boolean             @default(true)
+      userId             String
+      user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+      createdAt          DateTime            @default(now())
+      updatedAt          DateTime            @updatedAt
+      statusPageMonitors StatusPageMonitor[]
+    }
+    ```
+
+    **Fields:**
+    - `url`: Website URL to monitor
+    - `name`: Optional friendly name
+    - `isActive`: Monitoring enabled/disabled
+    - `userId`: Owner of the monitor
+  </Accordion>
+
+  <Accordion title="StatusPage Model">
+    Stores public status pages:
+
+    ```prisma
+    model StatusPage {
+      id          String              @id @default(cuid())
+      name        String
+      slug        String              @unique
+      isPublished Boolean             @default(true)
+      userId      String
+      user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+      monitors    StatusPageMonitor[]
+      domain      StatusPageDomain?
+      createdAt   DateTime            @default(now())
+      updatedAt   DateTime            @updatedAt
+    }
+    ```
+
+    **Fields:**
+    - `name`: Status page name
+    - `slug`: Unique URL slug
+    - `isPublished`: Public visibility
+    - `domain`: Custom domain configuration
+  </Accordion>
+
+  <Accordion title="StatusPageMonitor Model">
+    Links websites to status pages:
+
+    ```prisma
+    model StatusPageMonitor {
+      statusPageId String
+      websiteId    String
+      createdAt    DateTime   @default(now())
+      statusPage   StatusPage @relation(fields: [statusPageId], references: [id], onDelete: Cascade)
+      website      Website    @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+      @@id([statusPageId, websiteId])
+    }
+    ```
+
+    **Purpose:** Many-to-many relationship between status pages and monitors
+  </Accordion>
+
+  <Accordion title="StatusPageDomain Model">
+    Stores custom domain configuration:
+
+    ```prisma
+    model StatusPageDomain {
+      id                 String                         @id @default(cuid())
+      statusPageId       String                         @unique
+      hostname           String                         @unique
+      verificationToken  String
+      verificationStatus StatusDomainVerificationStatus @default(PENDING)
+      verifiedAt         DateTime?
+      createdAt          DateTime                       @default(now())
+      updatedAt          DateTime                       @updatedAt
+      statusPage         StatusPage                     @relation(fields: [statusPageId], references: [id], onDelete: Cascade)
+    }
+    ```
+
+    **Purpose:** Custom domain verification for status pages
+  </Accordion>
+
+  <Accordion title="EmailVerificationToken Model">
+    Stores email verification tokens:
+
+    ```prisma
+    model EmailVerificationToken {
+      id        String   @id @default(cuid())
+      token     String   @unique
+      email     String
+      expiresAt DateTime
+      createdAt DateTime @default(now())
+    }
+    ```
+
+    **Purpose:** Email verification during user registration
+  </Accordion>
+</AccordionGroup>
+
+### Enums
+
+<ParamField path="UptimeStatus" type="enum">
+  Status of uptime checks
+
+  **Values:**
+  - `UP`: Website is responding
+  - `DOWN`: Website is not responding
+</ParamField>
+
+<ParamField path="StatusDomainVerificationStatus" type="enum">
+  Custom domain verification status
+
+  **Values:**
+  - `PENDING`: Verification in progress
+  - `VERIFIED`: Domain verified successfully
+  - `FAILED`: Verification failed
+</ParamField>
+
+## Running Migrations
+
+### Initial Setup
+
+<Steps>
+  <Step title="Navigate to store package">
+    ```bash
+    cd packages/store
+    ```
+  </Step>
+
+  <Step title="Generate Prisma Client">
+    ```bash
+    npx prisma generate
+    ```
+
+    Or with Bun:
+    ```bash
+    bun prisma generate
+    ```
+
+    This creates the Prisma Client in `packages/store/generated/prisma/`.
+  </Step>
+
+  <Step title="Run migrations">
+    **Development (create and apply):**
+    ```bash
+    npx prisma migrate dev
+    ```
+
+    **Production (apply existing):**
+    ```bash
+    npx prisma migrate deploy
+    ```
+  </Step>
+
+  <Step title="Verify database">
+    ```bash
+    npx prisma studio
+    ```
+
+    Opens Prisma Studio at http://localhost:5555 to view and edit data.
+  </Step>
+</Steps>
+
+### Common Prisma Commands
+
+```bash
+# Generate Prisma Client
+npx prisma generate
+
+# Create a new migration
+npx prisma migrate dev --name description_of_changes
+
+# Apply migrations to production
+npx prisma migrate deploy
+
+# Reset database (⚠️ deletes all data)
+npx prisma migrate reset
+
+# View database in browser
+npx prisma studio
+
+# Validate schema
+npx prisma validate
+
+# Format schema file
+npx prisma format
+
+# View migration status
+npx prisma migrate status
+```
+
+## Database Indexes
+
+The schema includes optimized indexes for common queries:
+
+<CodeGroup>
+
+```prisma User Indexes
+@@index([email])
+```
+
+```prisma Website Indexes
+@@index([userId])
+```
+
+```prisma StatusPage Indexes
+@@index([userId])
+```
+
+```prisma StatusPageMonitor Indexes
+@@index([websiteId])
+```
+
+```prisma EmailVerificationToken Indexes
+@@index([token])
+@@index([email])
+```
+
+```prisma StatusPageDomain Indexes
+@@index([verificationStatus])
+```
+
+</CodeGroup>
+
+<Info>
+  Indexes improve query performance but use additional disk space. These indexes are optimized for Better Uptime's query patterns.
+</Info>
+
+## Database Relationships
+
+```mermaid
+erDiagram
+    User ||--o{ Account : has
+    User ||--o{ Website : owns
+    User ||--o{ StatusPage : creates
+    Website ||--o{ StatusPageMonitor : in
+    StatusPage ||--o{ StatusPageMonitor : contains
+    StatusPage ||--o| StatusPageDomain : has
+```
+
+**Key Relationships:**
+- Users can have multiple OAuth accounts
+- Users can create multiple websites and status pages
+- Status pages can contain multiple monitors
+- Monitors link websites to status pages (many-to-many)
+- Status pages can have one custom domain
+
+## Backup and Restore
+
+### Backup Database
+
+```bash
+# Backup to file
+pg_dump -U postgres -d better_uptime -F c -f backup_$(date +%Y%m%d).dump
+
+# Or plain SQL format
+pg_dump -U postgres -d better_uptime > backup_$(date +%Y%m%d).sql
+```
+
+### Restore Database
+
+```bash
+# Restore from custom format
+pg_restore -U postgres -d better_uptime -c backup.dump
+
+# Restore from SQL format
+psql -U postgres -d better_uptime < backup.sql
+```
+
+### Automated Backups
+
+Create a cron job for daily backups:
+
+```bash
+# Edit crontab
+crontab -e
+
+# Add daily backup at 2 AM
+0 2 * * * pg_dump -U postgres -d better_uptime -F c -f /backups/better_uptime_$(date +\%Y\%m\%d).dump
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection Refused">
+    **Error:** `Error: connect ECONNREFUSED 127.0.0.1:5432`
+
+    **Solutions:**
+    1. Verify PostgreSQL is running:
+       ```bash
+       sudo systemctl status postgresql
+       ```
+
+    2. Check PostgreSQL is listening:
+       ```bash
+       sudo netstat -tulpn | grep 5432
+       ```
+
+    3. Verify connection string in `.env`
+  </Accordion>
+
+  <Accordion title="Authentication Failed">
+    **Error:** `Error: password authentication failed for user`
+
+    **Solutions:**
+    1. Verify username and password in `DATABASE_URL`
+
+    2. Check PostgreSQL authentication method in `pg_hba.conf`:
+       ```bash
+       sudo nano /etc/postgresql/15/main/pg_hba.conf
+       ```
+
+    3. Change authentication to `md5` or `scram-sha-256`
+
+    4. Restart PostgreSQL:
+       ```bash
+       sudo systemctl restart postgresql
+       ```
+  </Accordion>
+
+  <Accordion title="Migration Failures">
+    **Error:** `Migration failed to apply`
+
+    **Solutions:**
+    1. Check migration status:
+       ```bash
+       npx prisma migrate status
+       ```
+
+    2. Resolve failed migration:
+       ```bash
+       npx prisma migrate resolve --applied migration_name
+       ```
+
+    3. If all else fails, reset (⚠️ deletes all data):
+       ```bash
+       npx prisma migrate reset
+       ```
+  </Accordion>
+
+  <Accordion title="SSL Required">
+    **Error:** `no pg_hba.conf entry for host, SSL off`
+
+    **Solution:** Add `?sslmode=require` to connection string:
+    ```bash
+    DATABASE_URL=postgresql://user:password@host:5432/database?sslmode=require
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Production Best Practices
+
+<AccordionGroup>
+  <Accordion title="Connection Pooling">
+    Use connection pooling for better performance:
+
+    ```bash
+    # PgBouncer connection string
+    DATABASE_URL=postgresql://user:password@localhost:6432/better_uptime?pgbouncer=true
+    ```
+
+    Or use Prisma's connection pool settings:
+    ```prisma
+    datasource db {
+      provider = "postgresql"
+      url      = env("DATABASE_URL")
+      connection_limit = 10
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Regular Backups">
+    - Automate daily backups
+    - Store backups off-site
+    - Test restore procedures regularly
+    - Keep at least 30 days of backups
+  </Accordion>
+
+  <Accordion title="Monitoring">
+    Monitor database health:
+    - Query performance
+    - Connection count
+    - Disk usage
+    - Replication lag (if using replicas)
+  </Accordion>
+
+  <Accordion title="Security">
+    - Use strong passwords
+    - Enable SSL/TLS connections
+    - Restrict network access
+    - Keep PostgreSQL updated
+    - Use read-only replicas for reporting
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Development Setup" icon="code" href="/deployment/docker-development">
+    Set up local development environment
+  </Card>
+  <Card title="Production Deployment" icon="rocket" href="/deployment/docker-production">
+    Deploy to production
+  </Card>
+  <Card title="Environment Variables" icon="gear" href="/deployment/environment-variables">
+    Configure all environment variables
+  </Card>
+</CardGroup>

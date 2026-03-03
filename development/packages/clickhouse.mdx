@@ -1,0 +1,279 @@
+---
+title: '@repo/clickhouse'
+description: 'ClickHouse client wrapper for uptime metrics'
+---
+
+The `@repo/clickhouse` package provides a ClickHouse client wrapper for recording and querying uptime metrics.
+
+## Overview
+
+This package exports:
+- `recordUptimeEvent()` - Record a single uptime check
+- `recordUptimeEvents()` - Batch record multiple checks
+- `getRecentStatusEvents()` - Query recent status events
+- `getStatusEventsForLookbackHours()` - Query historical events
+- `getClickhouseClient()` - Get the underlying ClickHouse client
+
+## Configuration
+
+Required environment variables:
+
+```bash
+CLICKHOUSE_URL=http://localhost:8123
+CLICKHOUSE_USERNAME=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DATABASE=default
+CLICKHOUSE_METRICS_TABLE=uptime_checks
+```
+
+From `packages/clickhouse/README.md`.
+
+## Table Schema
+
+The package automatically creates the table if it doesn't exist:
+
+```sql packages/clickhouse/src/index.ts
+CREATE TABLE IF NOT EXISTS uptime_checks (
+  website_id String,
+  region_id String,
+  status Enum('UP' = 1, 'DOWN' = 0),
+  response_time_ms Nullable(UInt32),
+  http_status_code Nullable(UInt16),
+  checked_at DateTime64(3, 'UTC'),
+  ingested_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+ORDER BY (website_id, region_id, checked_at)
+```
+
+## Recording Events
+
+### Single Event
+
+```typescript
+import { recordUptimeEvent } from "@repo/clickhouse";
+
+await recordUptimeEvent({
+  websiteId: "abc-123",
+  regionId: "iad",
+  status: "UP",
+  responseTimeMs: 120,
+  httpStatusCode: 200,
+  checkedAt: new Date(),
+});
+```
+
+### Batch Events
+
+From the worker app:
+
+```typescript apps/worker/src/index.ts
+import { recordUptimeEvents } from "@repo/clickhouse";
+
+// Process multiple website checks
+const results = await Promise.allSettled(
+  websites.map(w => checkWebsite(w.url, w.id))
+);
+
+const events = results
+  .filter(r => r.status === "fulfilled")
+  .map(r => r.value);
+
+// Batch insert to ClickHouse
+await recordUptimeEvents(events);
+```
+
+The batch function automatically handles chunking for large batches:
+
+```typescript packages/clickhouse/src/index.ts
+const CLICKHOUSE_MAX_BATCH_SIZE = 1000;
+
+export async function recordUptimeEvents(
+  events: UptimeEventRecord[],
+): Promise<void> {
+  if (events.length <= CLICKHOUSE_MAX_BATCH_SIZE) {
+    await clickhouse.insert({ /* ... */ });
+  } else {
+    // Split into chunks of 1000
+    for (let i = 0; i < events.length; i += CLICKHOUSE_MAX_BATCH_SIZE) {
+      const chunk = events.slice(i, i + CLICKHOUSE_MAX_BATCH_SIZE);
+      await clickhouse.insert({ /* ... */ });
+    }
+  }
+}
+```
+
+## Querying Events
+
+### Recent Events (Per-Check Mode)
+
+Get the most recent N checks per website:
+
+```typescript
+import { getRecentStatusEvents } from "@repo/clickhouse";
+
+const events = await getRecentStatusEvents(
+  ["website_1", "website_2"],
+  90 // limit per website
+);
+
+// Returns: StatusEventRow[]
+// [
+//   {
+//     website_id: "website_1",
+//     region_id: "iad",
+//     status: "UP",
+//     checked_at: "2026-03-03 10:30:00.000",
+//     response_time_ms: 120,
+//     http_status_code: 200
+//   },
+//   ...
+// ]
+```
+
+### Historical Events (Per-Day Mode)
+
+Get all events within a time window:
+
+```typescript
+import { getStatusEventsForLookbackHours } from "@repo/clickhouse";
+
+const events = await getStatusEventsForLookbackHours(
+  ["website_1", "website_2"],
+  24 * 30 // 30 days in hours
+);
+```
+
+Real usage in API:
+
+```typescript packages/api/src/routes/website.ts
+const viewMode = opts.input?.viewMode ?? "per-check";
+
+if (viewMode === "per-day") {
+  statusEvents = await getStatusEventsForLookbackHours(
+    websiteIds,
+    31 * 24 // 31 days
+  );
+} else {
+  statusEvents = await getRecentStatusEvents(
+    websiteIds,
+    90 // 90 most recent checks
+  );
+}
+```
+
+## Types
+
+### UptimeEventRecord
+
+```typescript packages/clickhouse/src/index.ts
+export interface UptimeEventRecord {
+  websiteId: string;
+  regionId: string;
+  status: UptimeStatus;
+  responseTimeMs?: number;
+  httpStatusCode?: number;
+  checkedAt: Date;
+}
+```
+
+### UptimeStatus
+
+```typescript packages/clickhouse/src/index.ts
+export type UptimeStatus = "UP" | "DOWN";
+```
+
+### StatusEventRow
+
+```typescript packages/clickhouse/src/index.ts
+type StatusEventRow = {
+  website_id: string;
+  region_id: string;
+  status: "UP" | "DOWN";
+  checked_at: string;
+  response_time_ms: number | null;
+  http_status_code: number | null;
+};
+```
+
+## Timeout Protection
+
+All operations have configurable timeouts:
+
+```typescript packages/clickhouse/src/index.ts
+const CLICKHOUSE_SCHEMA_TIMEOUT_MS = 10_000;
+const CLICKHOUSE_QUERY_TIMEOUT_MS = 3_000;
+const CLICKHOUSE_HISTORICAL_QUERY_TIMEOUT_MS = 10_000;
+const INSERT_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(
+  promise: Promise<T>, 
+  timeoutMs: number, 
+  label: string
+) {
+  return Promise.race([
+    promise, 
+    new Promise((_, reject) => 
+      setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs)
+    )
+  ]);
+}
+```
+
+## Schema Management
+
+The package automatically ensures the schema exists before operations:
+
+```typescript packages/clickhouse/src/index.ts
+async function ensureSchema(): Promise<void> {
+  // Creates table if not exists
+  await clickhouse.command({
+    query: `CREATE TABLE IF NOT EXISTS ${CLICKHOUSE_METRICS_TABLE} ...`
+  });
+  
+  // Adds http_status_code column if not exists
+  await clickhouse.command({
+    query: `ALTER TABLE ${CLICKHOUSE_METRICS_TABLE}
+            ADD COLUMN IF NOT EXISTS http_status_code Nullable(UInt16)`
+  });
+}
+```
+
+Schema is cached for 5 minutes to avoid repeated checks:
+
+```typescript packages/clickhouse/src/index.ts
+const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
+let schemaVerifiedAt: number | null = null;
+
+if (schemaVerifiedAt && Date.now() - schemaVerifiedAt > SCHEMA_CACHE_TTL_MS) {
+  schemaReadyPromise = null; // Invalidate cache
+}
+```
+
+## Error Handling
+
+The package handles errors gracefully and returns empty arrays on failure:
+
+```typescript packages/clickhouse/src/index.ts
+export async function getRecentStatusEvents(
+  websiteIds: string[],
+  limit: number = 90,
+): Promise<StatusEventRow[]> {
+  try {
+    await ensureSchema();
+  } catch {
+    return []; // ClickHouse not available
+  }
+  
+  try {
+    const result = await clickhouse.query({ /* ... */ });
+    return await result.json();
+  } catch {
+    return []; // Query failed
+  }
+}
+```
+
+## Location
+
+`packages/clickhouse/src/index.ts`

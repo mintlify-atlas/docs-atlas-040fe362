@@ -1,0 +1,321 @@
+---
+title: 'Authentication'
+description: 'Learn how authentication works in the Better Uptime API'
+---
+
+## Overview
+
+Better Uptime uses JWT (JSON Web Tokens) for API authentication. The API supports both traditional email/password authentication and GitHub OAuth.
+
+## Authentication Flow
+
+The API provides two types of procedures:
+
+- **Public Procedures**: Available to all users without authentication
+- **Protected Procedures**: Require a valid JWT token in the Authorization header
+
+## Context Creation
+
+Every API request creates a context that includes the authenticated user (if any):
+
+```typescript
+export interface Context {
+  user: { userId: string } | null;
+}
+
+export function createContext(opts: CreateHTTPContextOptions): Context {
+  const authHeader = opts.req.headers.authorization;
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    return { user: null };
+  }
+
+  const token = authHeader.slice(7);
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    return { user: decoded };
+  } catch {
+    return { user: null };
+  }
+}
+```
+
+## Public Procedures
+
+Public procedures are accessible without authentication:
+
+```typescript
+import { publicProcedure } from '@repo/api';
+import { z } from 'zod';
+
+export const myRouter = router({
+  signup: publicProcedure
+    .input(z.object({
+      email: z.string().email(),
+      password: z.string().min(8),
+    }))
+    .mutation(async ({ input }) => {
+      // Create user account
+      return { message: 'Account created successfully' };
+    }),
+});
+```
+
+## Protected Procedures
+
+Protected procedures require authentication and throw an `UNAUTHORIZED` error if no valid token is provided:
+
+```typescript
+import { protectedProcedure } from '@repo/api';
+
+export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+  return next({ ctx: { user: ctx.user } });
+});
+```
+
+Example usage:
+
+```typescript
+export const myRouter = router({
+  me: protectedProcedure
+    .query(async ({ ctx }) => {
+      // ctx.user is guaranteed to exist
+      const user = await prismaClient.user.findUnique({
+        where: { id: ctx.user.userId },
+      });
+      return user;
+    }),
+});
+```
+
+## Login Flow
+
+### Email/Password Authentication
+
+Users can log in with email and password:
+
+```typescript
+login: publicProcedure
+  .input(userInputValidation) // { email, password }
+  .output(userOutputValidation) // { token }
+  .mutation(async (opts) => {
+    const { email, password } = opts.input;
+
+    const user = await prismaClient.user.findFirst({
+      where: { email },
+    });
+
+    if (!user || !user.passwordHash) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "user not found",
+      });
+    }
+
+    // Check if email is verified
+    if (!user.emailVerified) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Please verify your email before logging in",
+      });
+    }
+
+    const passwordMatched = await Bun.password.verify(
+      password,
+      user.passwordHash,
+    );
+
+    if (!passwordMatched) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "invalid credentials",
+      });
+    }
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    return { token };
+  }),
+```
+
+## GitHub OAuth Flow
+
+Better Uptime supports GitHub OAuth for seamless authentication:
+
+```typescript
+githubAuth: publicProcedure
+  .input(githubAuthInput) // { code: string }
+  .output(userOutputValidation) // { token: string }
+  .mutation(async ({ input }) => {
+    const { code } = input;
+
+    // Step 1: Exchange code for access token
+    const tokenResponse = await fetch(GITHUB_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
+        code,
+      }),
+    });
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+
+    // Step 2: Fetch user profile
+    const userResponse = await fetch(GITHUB_USER_URL, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const githubUser = await userResponse.json();
+
+    // Step 3: Find or create user
+    // ... (linking GitHub account to user)
+
+    // Step 4: Create JWT token
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    return { token };
+  }),
+```
+
+## Making Authenticated Requests
+
+### From the Client
+
+Include the JWT token in the Authorization header:
+
+```typescript
+const token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
+
+const result = await trpc.user.me.query(undefined, {
+  context: {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  },
+});
+```
+
+### Token Storage
+
+Store the JWT token securely:
+
+- **Web**: Use httpOnly cookies or secure localStorage
+- **Mobile**: Use secure storage (Keychain/Keystore)
+- **Server**: Store in environment variables
+
+## Email Verification
+
+New users must verify their email before logging in:
+
+```typescript
+verifyEmail: publicProcedure
+  .input(verifyEmailInput) // { token: string }
+  .output(userOutputValidation) // { token: string }
+  .mutation(async ({ input }) => {
+    const { token } = input;
+
+    // Find verification token
+    const verificationToken = await prismaClient.emailVerificationToken.findUnique({
+      where: { token },
+    });
+
+    if (!verificationToken) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Invalid or expired verification link",
+      });
+    }
+
+    // Mark email as verified
+    await prismaClient.user.update({
+      where: { email: verificationToken.email },
+      data: { emailVerified: true },
+    });
+
+    // Generate JWT token
+    const jwtToken = jwt.sign({ userId: user.id }, JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    return { token: jwtToken };
+  }),
+```
+
+## Token Expiration
+
+JWT tokens expire after 1 hour. Clients should:
+
+1. Handle `UNAUTHORIZED` errors
+2. Prompt user to log in again
+3. Implement token refresh (if needed)
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Store JWT_SECRET securely">
+    Never commit your `JWT_SECRET` to version control. Use environment variables:
+    
+    ```bash
+    JWT_SECRET=your-super-secret-key
+    ```
+  </Accordion>
+
+  <Accordion title="Use HTTPS in production">
+    Always use HTTPS to prevent token interception:
+    
+    ```typescript
+    // Enforce HTTPS in production
+    if (process.env.NODE_ENV === 'production' && !req.secure) {
+      throw new Error('HTTPS required');
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Validate token expiration">
+    Set appropriate token expiration times and implement refresh logic:
+    
+    ```typescript
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, {
+      expiresIn: "1h", // Short-lived tokens
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="Sanitize user input">
+    Always validate and sanitize user input using Zod schemas:
+    
+    ```typescript
+    const userInputValidation = z.object({
+      email: z.string().email(),
+      password: z.string().min(8),
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="User Router" icon="user" href="/api/user">
+    Explore authentication endpoints in detail
+  </Card>
+  <Card title="Protected Routes" icon="shield" href="/api/website">
+    Learn about protected website monitoring endpoints
+  </Card>
+</CardGroup>

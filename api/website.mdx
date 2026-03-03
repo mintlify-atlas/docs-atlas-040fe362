@@ -1,0 +1,395 @@
+---
+title: Website Endpoints
+description: Monitor and manage website uptime checks
+---
+
+<Note>All website endpoints require authentication.</Note>
+
+## register
+
+Register a new website to monitor for uptime.
+
+### Input Parameters
+
+<ParamField path="url" type="string" required>
+  Website URL to monitor. Must use HTTP or HTTPS protocol.
+</ParamField>
+
+<ParamField path="name" type="string">
+  Optional display name for the website (max 255 characters)
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  Unique identifier for the website
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  The monitored URL
+</ResponseField>
+
+<ResponseField name="name" type="string | null">
+  Display name for the website
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the website is actively being monitored
+</ResponseField>
+
+<ResponseField name="userId" type="string">
+  Owner's user ID
+</ResponseField>
+
+<ResponseField name="createdAt" type="date">
+  When the website was registered
+</ResponseField>
+
+<ResponseField name="updatedAt" type="date">
+  Last update timestamp
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const website = await trpc.website.register.mutate({
+  url: "https://example.com",
+  name: "My Website"
+});
+
+console.log(website.id);
+```
+
+```json Response
+{
+  "id": "clx1234567890",
+  "url": "https://example.com",
+  "name": "My Website",
+  "isActive": true,
+  "userId": "clx0987654321",
+  "createdAt": "2024-03-15T10:30:00.000Z",
+  "updatedAt": "2024-03-15T10:30:00.000Z"
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `CONFLICT` - Website URL already registered for this user
+
+---
+
+## list
+
+Get all active websites for the authenticated user.
+
+### Response
+
+<ResponseField name="websites" type="array">
+  Array of website objects
+  
+  <Expandable title="Website Object">
+    <ResponseField name="id" type="string">
+      Unique identifier
+    </ResponseField>
+    
+    <ResponseField name="url" type="string">
+      Monitored URL
+    </ResponseField>
+    
+    <ResponseField name="name" type="string | null">
+      Display name
+    </ResponseField>
+    
+    <ResponseField name="isActive" type="boolean">
+      Active status
+    </ResponseField>
+    
+    <ResponseField name="userId" type="string">
+      Owner's user ID
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="date">
+      Creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="date">
+      Last update timestamp
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total" type="number">
+  Total number of websites
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.website.list.query();
+
+console.log(`Total websites: ${result.total}`);
+result.websites.forEach(site => {
+  console.log(`${site.name}: ${site.url}`);
+});
+```
+
+```json Response
+{
+  "websites": [
+    {
+      "id": "clx1234567890",
+      "url": "https://example.com",
+      "name": "My Website",
+      "isActive": true,
+      "userId": "clx0987654321",
+      "createdAt": "2024-03-15T10:30:00.000Z",
+      "updatedAt": "2024-03-15T10:30:00.000Z"
+    }
+  ],
+  "total": 1
+}
+```
+</CodeGroup>
+
+---
+
+## get
+
+Get details for a specific website by ID.
+
+### Input Parameters
+
+<ParamField path="id" type="string" required>
+  Website ID
+</ParamField>
+
+### Response
+
+Returns a website object (same structure as in `register`).
+
+<CodeGroup>
+```typescript TypeScript
+const website = await trpc.website.get.query({
+  id: "clx1234567890"
+});
+
+console.log(website.url);
+```
+</CodeGroup>
+
+### Error Codes
+
+- `NOT_FOUND` - Website not found or doesn't belong to user
+
+---
+
+## update
+
+Update website details.
+
+### Input Parameters
+
+<ParamField path="id" type="string" required>
+  Website ID to update
+</ParamField>
+
+<ParamField path="url" type="string">
+  New URL (must use HTTP/HTTPS)
+</ParamField>
+
+<ParamField path="name" type="string">
+  New display name (max 255 characters)
+</ParamField>
+
+<ParamField path="isActive" type="boolean">
+  Enable or disable monitoring
+</ParamField>
+
+### Response
+
+Returns the updated website object.
+
+<CodeGroup>
+```typescript TypeScript
+const website = await trpc.website.update.mutate({
+  id: "clx1234567890",
+  name: "Updated Name",
+  isActive: false
+});
+```
+
+```json Response
+{
+  "id": "clx1234567890",
+  "url": "https://example.com",
+  "name": "Updated Name",
+  "isActive": false,
+  "userId": "clx0987654321",
+  "createdAt": "2024-03-15T10:30:00.000Z",
+  "updatedAt": "2024-03-15T12:00:00.000Z"
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `NOT_FOUND` - Website not found or doesn't belong to user
+
+---
+
+## delete
+
+Soft delete a website (sets `isActive` to false).
+
+### Input Parameters
+
+<ParamField path="id" type="string" required>
+  Website ID to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Always returns `true` on success
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.website.delete.mutate({
+  id: "clx1234567890"
+});
+
+console.log(result.success); // true
+```
+
+```json Response
+{
+  "success": true
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `NOT_FOUND` - Website not found or doesn't belong to user
+
+---
+
+## status
+
+Get status history and current status for all user's websites.
+
+### Input Parameters
+
+<ParamField path="viewMode" type="enum" default="per-check">
+  View mode for status data:
+  - `per-check` - Returns up to 90 most recent individual checks
+  - `per-day` - Returns aggregated daily data for last 31 days
+</ParamField>
+
+### Response
+
+<ResponseField name="websites" type="array">
+  Array of website status objects
+  
+  <Expandable title="Website Status Object">
+    <ResponseField name="websiteId" type="string">
+      Website unique identifier
+    </ResponseField>
+    
+    <ResponseField name="websiteName" type="string | null">
+      Website display name
+    </ResponseField>
+    
+    <ResponseField name="websiteUrl" type="string">
+      Website URL
+    </ResponseField>
+    
+    <ResponseField name="statusPoints" type="array">
+      Historical status check data points
+      
+      <Expandable title="Status Point">
+        <ResponseField name="status" type="enum">
+          Either `"UP"` or `"DOWN"`
+        </ResponseField>
+        
+        <ResponseField name="checkedAt" type="date">
+          When the check was performed
+        </ResponseField>
+        
+        <ResponseField name="responseTimeMs" type="number | null">
+          Response time in milliseconds (null if check failed)
+        </ResponseField>
+        
+        <ResponseField name="httpStatusCode" type="number | null">
+          HTTP status code (null if check failed)
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="currentStatus" type="object | null">
+      Most recent status check (null if never checked)
+      
+      <Expandable title="Current Status">
+        <ResponseField name="status" type="enum">
+          Either `"UP"` or `"DOWN"`
+        </ResponseField>
+        
+        <ResponseField name="checkedAt" type="date">
+          When the check was performed
+        </ResponseField>
+        
+        <ResponseField name="responseTimeMs" type="number | null">
+          Response time in milliseconds
+        </ResponseField>
+        
+        <ResponseField name="httpStatusCode" type="number | null">
+          HTTP status code
+        </ResponseField>
+        
+        <ResponseField name="regionId" type="string">
+          Check region identifier
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.website.status.query({
+  viewMode: "per-check"
+});
+
+result.websites.forEach(site => {
+  console.log(`${site.websiteName}: ${site.currentStatus?.status}`);
+  console.log(`Response time: ${site.currentStatus?.responseTimeMs}ms`);
+});
+```
+
+```json Response
+{
+  "websites": [
+    {
+      "websiteId": "clx1234567890",
+      "websiteName": "My Website",
+      "websiteUrl": "https://example.com",
+      "statusPoints": [
+        {
+          "status": "UP",
+          "checkedAt": "2024-03-15T12:00:00.000Z",
+          "responseTimeMs": 245,
+          "httpStatusCode": 200
+        }
+      ],
+      "currentStatus": {
+        "status": "UP",
+        "checkedAt": "2024-03-15T12:00:00.000Z",
+        "responseTimeMs": 245,
+        "httpStatusCode": 200,
+        "regionId": "us-east-1"
+      }
+    }
+  ]
+}
+```
+</CodeGroup>

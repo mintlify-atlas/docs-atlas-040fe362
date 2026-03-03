@@ -1,0 +1,375 @@
+---
+title: 'Uptime Monitoring'
+description: 'Learn how Better Uptime monitors your websites with a distributed worker/publisher architecture'
+icon: 'chart-line'
+---
+
+## How Monitoring Works
+
+Better Uptime uses a distributed architecture to monitor your websites reliably at scale:
+
+<Steps>
+  <Step title="Publisher Service">
+    The publisher service runs every 3 minutes and queries all active websites from the database, then publishes them to a Redis stream for processing.
+  </Step>
+  
+  <Step title="Worker Processing">
+    Multiple worker instances consume messages from the Redis stream, perform HTTP checks, and record results to ClickHouse.
+  </Step>
+  
+  <Step title="Metrics Storage">
+    All uptime events are stored in ClickHouse for fast querying and long-term analysis.
+  </Step>
+</Steps>
+
+## Architecture Overview
+
+### Publisher Service
+
+The publisher service continuously fetches active websites and enqueues them for monitoring:
+
+```typescript packages/api/src/routes/website.ts
+// Immediate first check: publish website immediately once
+// Then let periodic publisher handle rest
+try {
+  await xAddBulk([{ url: website.url, id: website.id }]);
+  console.log(
+    `[website.register] Published website ${website.id} immediately for first check`,
+  );
+} catch (error) {
+  // Non-fatal: periodic publisher will pick it up
+  console.error(
+    `[website.register] Failed to publish website immediately:`,
+    error,
+  );
+}
+```
+
+The periodic publisher runs every 3 minutes:
+
+```typescript apps/publisher/src/index.ts
+const websites = await prismaClient.website.findMany({
+  where: {
+    isActive: true,
+  },
+  select: {
+    url: true,
+    id: true,
+  },
+});
+
+await xAddBulk(websites.map((w) => ({ url: w.url, id: w.id })));
+
+setInterval(() => {
+  publish();
+}, 3 * 60 * 1000); // Every 3 minutes
+```
+
+### Worker Service
+
+Workers consume messages from the Redis stream and perform HTTP checks:
+
+```typescript apps/worker/src/index.ts
+async function checkWebsite(
+  url: string,
+  websiteId: string,
+): Promise<UptimeEventRecord> {
+  const startTime = Date.now();
+  let status: UptimeStatus = "DOWN";
+  let responseTimeMs: number | undefined;
+  let httpStatus: number | undefined;
+  const checkedAt = new Date();
+
+  try {
+    const res = await axios.get(url, {
+      maxRedirects: 5,
+      validateStatus: () => true,
+      headers: {
+        "User-Agent":
+          "Uptique/1.0 (Uptime Monitor; https://uptique.raashed.xyz)",
+      },
+    });
+
+    responseTimeMs = Date.now() - startTime;
+    httpStatus = res.status;
+    status = typeof httpStatus === "number" && httpStatus < 500 ? "UP" : "DOWN";
+  } catch (error) {
+    responseTimeMs = Date.now() - startTime;
+  }
+
+  return {
+    websiteId,
+    regionId: REGION_ID,
+    status,
+    responseTimeMs,
+    httpStatusCode: httpStatus,
+    checkedAt,
+  };
+}
+```
+
+<Note>
+Workers consider a website "UP" if the HTTP status code is less than 500. Client errors (4xx) are considered UP since the server is responding.
+</Note>
+
+### Message Processing
+
+Workers process messages in batches and handle failures gracefully:
+
+```typescript apps/worker/src/index.ts
+// 1. Read fresh messages first
+const fresh = await xReadGroup({
+  consumerGroup: REGION_ID,
+  workerId: WORKER_ID,
+});
+
+if (fresh.length > 0) {
+  await processMessages(fresh, false);
+}
+
+// 2. PEL reclaim for stuck messages
+const reclaimed = await xAutoClaimStale({
+  consumerGroup: REGION_ID,
+  workerId: WORKER_ID,
+  minIdleMs: 300_000, // 5 minutes
+  count: 5,
+  maxTotalReclaim: 10,
+});
+
+if (reclaimed.length > 0) {
+  await processMessages(reclaimed, true);
+}
+```
+
+## Creating Monitors via API
+
+### Register a New Website
+
+Create a new monitor by registering a website URL:
+
+```typescript
+const website = await trpc.website.register.mutate({
+  url: "https://example.com",
+  name: "Example Website",
+});
+```
+
+The registration process:
+
+1. Validates the URL isn't already registered
+2. Creates a website record in Postgres
+3. Immediately publishes it to the Redis stream for the first check
+4. Returns the website object with ID
+
+```typescript packages/api/src/routes/website.ts
+register: protectedProcedure
+  .output(websiteOutput)
+  .input(createWebsiteInput)
+  .mutation(async (opts) => {
+    const { url, name } = opts.input;
+    const userId = opts.ctx.user.userId;
+
+    const websiteExists = await prismaClient.website.findFirst({
+      where: {
+        userId,
+        url,
+      },
+    });
+
+    if (websiteExists) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "website already registered",
+      });
+    }
+
+    const website = await prismaClient.website.create({
+      data: {
+        url,
+        name: name ?? null,
+        userId,
+        isActive: true,
+      },
+    });
+
+    // Immediate first check
+    await xAddBulk([{ url: website.url, id: website.id }]);
+
+    return website;
+  }),
+```
+
+### List Monitors
+
+Get all active monitors for the current user:
+
+```typescript
+const monitors = await trpc.website.list.query();
+console.log(`Total monitors: ${monitors.total}`);
+```
+
+### Update Monitor
+
+Update monitor properties:
+
+```typescript
+const updated = await trpc.website.update.mutate({
+  id: "website-id",
+  name: "Updated Name",
+  isActive: false, // Pause monitoring
+});
+```
+
+### Delete Monitor (Soft Delete)
+
+Monitors are soft-deleted to prevent race conditions:
+
+```typescript packages/api/src/routes/website.ts
+// Soft delete: set isActive = false instead of hard delete
+// This prevents race conditions, orphan stream messages, and UI confusion
+await prismaClient.website.update({
+  where: { id },
+  data: { isActive: false },
+});
+```
+
+## ClickHouse Metrics Storage
+
+All monitoring events are stored in ClickHouse for high-performance analytics.
+
+### Schema
+
+The uptime events table:
+
+```sql packages/clickhouse/src/index.ts
+CREATE TABLE IF NOT EXISTS uptime_events (
+  website_id String,
+  region_id String,
+  status Enum('UP' = 1, 'DOWN' = 0),
+  response_time_ms Nullable(UInt32),
+  http_status_code Nullable(UInt16),
+  checked_at DateTime64(3, 'UTC'),
+  ingested_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+ORDER BY (website_id, region_id, checked_at)
+```
+
+### Recording Events
+
+Workers record events in batches:
+
+```typescript packages/clickhouse/src/index.ts
+export async function recordUptimeEvents(
+  events: UptimeEventRecord[],
+): Promise<void> {
+  await ensureSchema();
+
+  if (events.length === 0) return;
+  const clickhouse = getClient();
+  const ingestedAt = toClickHouseDateTime64(new Date());
+
+  await clickhouse.insert({
+    table: CLICKHOUSE_METRICS_TABLE,
+    values: events.map((event) => ({
+      website_id: event.websiteId,
+      region_id: event.regionId,
+      status: event.status,
+      response_time_ms: event.responseTimeMs ?? null,
+      http_status_code: event.httpStatusCode ?? null,
+      checked_at: toClickHouseDateTime64(event.checkedAt),
+      ingested_at: ingestedAt,
+    })),
+    format: "JSONEachRow",
+  });
+}
+```
+
+### Querying Status Data
+
+Retrieve recent status events for monitors:
+
+```typescript packages/api/src/routes/website.ts
+const statusEvents = await getRecentStatusEvents(
+  websiteIds,
+  STATUS_EVENT_QUERY_CONFIG.PER_CHECK_LIMIT, // 90 checks
+);
+```
+
+The query implementation:
+
+```typescript packages/clickhouse/src/index.ts
+const query = `
+  SELECT 
+    website_id,
+    region_id,
+    status,
+    checked_at,
+    response_time_ms,
+    http_status_code
+  FROM ${CLICKHOUSE_METRICS_TABLE}
+  WHERE website_id IN (${escapedIds})
+  ORDER BY website_id, checked_at DESC
+  LIMIT ${limit} BY website_id
+`;
+```
+
+<Info>
+ClickHouse's `LIMIT BY` clause returns the most recent N events per website efficiently.
+</Info>
+
+## Status API Response
+
+The status endpoint returns current status and historical data:
+
+```typescript packages/api/src/routes/website.ts
+status: protectedProcedure
+  .input(websiteStatusInput.optional())
+  .output(websiteStatusListOutput)
+  .query(async (opts) => {
+    const userId = opts.ctx.user.userId;
+    const viewMode = opts.input?.viewMode ?? "per-check";
+
+    // Get websites from Postgres
+    const websites = await prismaClient.website.findMany({
+      where: {
+        userId,
+        isActive: true,
+      },
+    });
+
+    // Get status events from ClickHouse
+    const statusEvents = await getRecentStatusEvents(
+      websiteIds,
+      STATUS_EVENT_QUERY_CONFIG.PER_CHECK_LIMIT,
+    );
+
+    // Build response with current status and history
+    return { websites: websitesWithStatus };
+  }),
+```
+
+## Monitoring Configuration
+
+<ParamField path="PER_CHECK_LIMIT" type="number" default="90">
+  Maximum number of status checks to return per website
+</ParamField>
+
+<ParamField path="PER_DAY_LOOKBACK_DAYS" type="number" default="31">
+  Number of days to look back for daily aggregated data
+</ParamField>
+
+<ParamField path="WEBSITE_CHECK_TIMEOUT_MS" type="number" default="10000">
+  Timeout for HTTP checks in milliseconds
+</ParamField>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Status Pages" icon="browser" href="/features/status-pages">
+    Display monitor status on public pages
+  </Card>
+  <Card title="Notifications" icon="bell" href="/features/notifications">
+    Get alerted when monitors go down
+  </Card>
+</CardGroup>

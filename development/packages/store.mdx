@@ -1,0 +1,297 @@
+---
+title: '@repo/store'
+description: 'Prisma client and database models for Better Uptime'
+---
+
+The `@repo/store` package provides the Prisma client and database schema for Better Uptime.
+
+## Overview
+
+This package exports:
+- Configured Prisma client with PostgreSQL adapter
+- Database models and relations defined in `schema.prisma`
+- Migration scripts and database utilities
+
+## Exports
+
+From `packages/store/index.ts`:
+
+```typescript
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "./generated/prisma/index.js";
+import { DATABASE_URL } from "@repo/config";
+
+const adapter = new PrismaPg({ connectionString: DATABASE_URL });
+export const prismaClient = new PrismaClient({ adapter });
+```
+
+## Database Models
+
+The schema is defined in `packages/store/prisma/schema.prisma`.
+
+### User
+
+```prisma
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  passwordHash  String?
+  emailVerified Boolean      @default(false)
+  name          String?
+  avatarUrl     String?
+  isActive      Boolean      @default(true)
+  accounts      Account[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  website       Website[]
+  statusPages   StatusPage[]
+
+  @@index([email])
+}
+```
+
+### Account
+
+OAuth provider accounts (GitHub, etc.):
+
+```prisma
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  accessToken       String?
+  refreshToken      String?
+  expiresAt         Int?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+```
+
+### Website
+
+Monitored websites:
+
+```prisma
+model Website {
+  id                 String              @id @default(cuid())
+  url                String
+  name               String?
+  isActive           Boolean             @default(true)
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  statusPageMonitors StatusPageMonitor[]
+
+  @@index([userId])
+}
+```
+
+### StatusPage
+
+Public status pages:
+
+```prisma
+model StatusPage {
+  id          String              @id @default(cuid())
+  name        String
+  slug        String              @unique
+  isPublished Boolean             @default(true)
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  monitors    StatusPageMonitor[]
+  domain      StatusPageDomain?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([userId])
+}
+```
+
+### StatusPageDomain
+
+Custom domains for status pages:
+
+```prisma
+enum StatusDomainVerificationStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+model StatusPageDomain {
+  id                 String                         @id @default(cuid())
+  statusPageId       String                         @unique
+  hostname           String                         @unique
+  verificationToken  String
+  verificationStatus StatusDomainVerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  statusPage         StatusPage                     @relation(fields: [statusPageId], references: [id], onDelete: Cascade)
+
+  @@index([verificationStatus])
+}
+```
+
+## Enums
+
+### UptimeStatus
+
+```prisma
+enum UptimeStatus {
+  UP
+  DOWN
+}
+```
+
+### StatusDomainVerificationStatus
+
+```prisma
+enum StatusDomainVerificationStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+```
+
+## Usage Examples
+
+### Create a Website
+
+```typescript
+import { prismaClient } from "@repo/store";
+
+const website = await prismaClient.website.create({
+  data: {
+    url: "https://example.com",
+    name: "Example Site",
+    userId: "user_123",
+    isActive: true,
+  },
+});
+```
+
+### Query with Relations
+
+```typescript
+const user = await prismaClient.user.findUnique({
+  where: { email: "user@example.com" },
+  include: {
+    website: true,
+    statusPages: {
+      include: {
+        domain: true,
+        monitors: true,
+      },
+    },
+  },
+});
+```
+
+### Soft Delete
+
+Better Uptime uses soft deletes for websites:
+
+```typescript packages/api/src/routes/website.ts
+// Soft delete: set isActive = false instead of hard delete
+await prismaClient.website.update({
+  where: { id },
+  data: { isActive: false },
+});
+```
+
+### Timeout Protection
+
+Real usage in worker with timeout wrapper:
+
+```typescript apps/worker/src/index.ts
+const website = await withTimeout(
+  prismaClient.website.findUnique({
+    where: { id: websiteId },
+  }),
+  10_000, // 10 second timeout
+  `Prisma findUnique(${websiteId})`
+);
+
+if (!website || !website.isActive) {
+  // Handle inactive website
+}
+```
+
+## Scripts
+
+Available in `package.json`:
+
+```json
+{
+  "scripts": {
+    "prisma:studio": "bunx prisma studio",
+    "prisma:deploy": "bunx prisma migrate deploy",
+    "prisma:format": "bunx prisma format",
+    "prisma:migrate": "bunx prisma migrate dev",
+    "prisma:generate": "bunx prisma generate",
+    "prisma:validate": "bunx prisma validate"
+  }
+}
+```
+
+### Generate Prisma Client
+
+```bash
+bun run prisma:generate
+```
+
+### Create Migration
+
+```bash
+bun run prisma:migrate
+```
+
+### Open Prisma Studio
+
+```bash
+bun run prisma:studio
+```
+
+## Configuration
+
+The Prisma client uses a PostgreSQL adapter:
+
+```typescript packages/store/index.ts
+import { PrismaPg } from "@prisma/adapter-pg";
+
+const adapter = new PrismaPg({ 
+  connectionString: DATABASE_URL 
+});
+
+export const prismaClient = new PrismaClient({ adapter });
+```
+
+Required environment variable:
+- `DATABASE_URL` - PostgreSQL connection string
+
+## Schema Location
+
+`packages/store/prisma/schema.prisma`
+
+## Generated Client
+
+The Prisma client is generated to:
+```
+packages/store/generated/prisma/
+```
+
+Configured in `schema.prisma`:
+```prisma
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+```

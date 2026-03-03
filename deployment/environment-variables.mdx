@@ -1,0 +1,401 @@
+---
+title: 'Environment Variables'
+description: 'Complete reference for all Better Uptime environment variables'
+---
+
+## Overview
+
+Better Uptime uses environment variables for configuration. Variables can be set in a `.env` file in the project root or `packages/config/.env`.
+
+<Warning>
+  Never commit `.env` files to version control. Add `.env` to your `.gitignore`.
+</Warning>
+
+## Required Variables
+
+These variables must be set for Better Uptime to function:
+
+### Database
+
+<ParamField path="DATABASE_URL" type="string" required>
+  PostgreSQL connection string
+
+  **Format:** `postgresql://user:password@host:5432/database`
+
+  **Example:** `postgresql://postgres:mypassword@localhost:5432/better_uptime`
+</ParamField>
+
+### Authentication
+
+<ParamField path="JWT_SECRET" type="string" required>
+  Secret key for JWT token signing
+
+  **Development:** Can use `dev-secret`
+
+  **Production:** Must use cryptographically secure random string
+
+  **Generate:** `openssl rand -base64 32`
+
+  <Warning>
+    Never use development defaults in production
+  </Warning>
+</ParamField>
+
+### GitHub OAuth
+
+<ParamField path="CLIENT_ID_GITHUB" type="string" required>
+  GitHub OAuth application client ID
+
+  Create at: https://github.com/settings/developers
+</ParamField>
+
+<ParamField path="CLIENT_SECRET_GITHUB" type="string" required>
+  GitHub OAuth application client secret
+
+  Available after creating GitHub OAuth app
+</ParamField>
+
+### Email Service
+
+<ParamField path="RESEND_API_KEY" type="string" required>
+  Resend API key for sending emails
+
+  Get your API key at: https://resend.com/api-keys
+</ParamField>
+
+### Redis Configuration
+
+<ParamField path="REDIS_HOST" type="string" required>
+  Redis server hostname or IP address
+
+  **Development (Docker):** `redis`
+
+  **Production (Docker):** `redis` or `127.0.0.1`
+
+  **Production (PM2):** `127.0.0.1`
+</ParamField>
+
+<ParamField path="REDIS_PORT" type="number" default="6379">
+  Redis server port
+</ParamField>
+
+<ParamField path="REDIS_USERNAME" type="string" default="default">
+  Redis username (for Redis 6+ ACL)
+
+  **Development:** `default`
+
+  **Production:** Set if using Redis ACL, otherwise leave empty
+</ParamField>
+
+<ParamField path="REDIS_PASSWORD" type="string" required>
+  Redis password for authentication
+
+  **Development:** `dev-password`
+
+  **Production:** Strong random password (required)
+
+  **Generate:** `openssl rand -base64 32`
+
+  <Warning>
+    Production deployments must use a strong password
+  </Warning>
+</ParamField>
+
+## Service Configuration
+
+### Backend
+
+<ParamField path="BACKEND_PORT" type="number" default="8084">
+  Port for the backend tRPC API server
+</ParamField>
+
+<ParamField path="NODE_ENV" type="string" default="development">
+  Node environment mode
+
+  **Values:** `development`, `production`
+</ParamField>
+
+### Frontend
+
+<ParamField path="FRONTEND_PORT" type="number" default="3000">
+  Port for the Next.js frontend application
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_BACKEND_URL" type="string" required>
+  Public URL for the backend API
+
+  **Development:** `http://localhost:8084`
+
+  **Production:** `http://your-backend-url:8084`
+
+  <Info>
+    Must be prefixed with `NEXT_PUBLIC_` to be accessible in the browser
+  </Info>
+</ParamField>
+
+<ParamField path="WATCHPACK_POLLING" type="string" default="false">
+  Enable polling for file changes (useful in Docker)
+
+  **Development:** `true` (recommended for Docker)
+
+  **Production:** Not needed
+</ParamField>
+
+### Worker
+
+<ParamField path="REGION_ID" type="string" default="us-east-1">
+  Geographic region identifier for the worker
+
+  Used for organizing workers by location
+</ParamField>
+
+<ParamField path="WORKER_ID" type="string" default="worker-1">
+  Unique identifier for the worker instance
+
+  Use different IDs when scaling workers (e.g., `worker-1`, `worker-2`, `worker-3`)
+</ParamField>
+
+## Optional Variables
+
+### ClickHouse (Analytics)
+
+ClickHouse is optional and used for storing uptime check metrics.
+
+<ParamField path="CLICKHOUSE_URL" type="string" optional>
+  ClickHouse server URL
+
+  **Example:** `https://clickhouse.example.com:8443`
+
+  Leave empty to disable ClickHouse integration
+</ParamField>
+
+<ParamField path="CLICKHOUSE_USERNAME" type="string" default="default">
+  ClickHouse username
+</ParamField>
+
+<ParamField path="CLICKHOUSE_PASSWORD" type="string" optional>
+  ClickHouse password
+</ParamField>
+
+<ParamField path="CLICKHOUSE_DATABASE" type="string" default="default">
+  ClickHouse database name
+</ParamField>
+
+<ParamField path="CLICKHOUSE_METRICS_TABLE" type="string" default="uptime_checks">
+  Table name for storing uptime check metrics
+</ParamField>
+
+## Environment Templates
+
+### Development Template
+
+Create `.env` with these values for local development:
+
+```bash .env
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/database
+
+# Auth (can use dev defaults)
+JWT_SECRET=dev-secret-change-in-production
+
+# GitHub OAuth
+CLIENT_ID_GITHUB=your-github-client-id
+CLIENT_SECRET_GITHUB=your-github-client-secret
+
+# Email (Resend)
+RESEND_API_KEY=your-resend-api-key
+
+# Redis Configuration (dev defaults)
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_USERNAME=default
+REDIS_PASSWORD=dev-password
+
+# Backend
+BACKEND_PORT=8084
+
+# Frontend
+FRONTEND_PORT=3000
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8084
+WATCHPACK_POLLING=true
+
+# Worker Configuration
+REGION_ID=us-east-1
+WORKER_ID=worker-1
+
+# ClickHouse (optional)
+CLICKHOUSE_URL=
+CLICKHOUSE_USERNAME=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DATABASE=default
+CLICKHOUSE_METRICS_TABLE=uptime_checks
+```
+
+### Production Template
+
+Create `.env` with these values for production:
+
+```bash .env
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/database
+
+# Auth (REQUIRED - use strong secret)
+JWT_SECRET=your-strong-jwt-secret-here
+
+# GitHub OAuth
+CLIENT_ID_GITHUB=your-github-client-id
+CLIENT_SECRET_GITHUB=your-github-client-secret
+
+# Email (Resend)
+RESEND_API_KEY=your-resend-api-key
+
+# Redis Configuration (REQUIRED - use strong password)
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_USERNAME=
+REDIS_PASSWORD=your-strong-redis-password
+
+# Backend
+BACKEND_PORT=8084
+
+# Frontend
+FRONTEND_PORT=3000
+NEXT_PUBLIC_BACKEND_URL=http://your-backend-url:8084
+
+# Worker Configuration
+REGION_ID=us-east-1
+WORKER_ID=worker-1
+
+# ClickHouse (optional)
+CLICKHOUSE_URL=https://clickhouse.example.com:8443
+CLICKHOUSE_USERNAME=default
+CLICKHOUSE_PASSWORD=your-clickhouse-password
+CLICKHOUSE_DATABASE=default
+CLICKHOUSE_METRICS_TABLE=uptime_checks
+```
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Generate Strong Secrets">
+    Use cryptographically secure random strings for all secrets:
+
+    ```bash
+    # Generate JWT secret
+    openssl rand -base64 32
+
+    # Generate Redis password
+    openssl rand -base64 32
+    ```
+  </Accordion>
+
+  <Accordion title="Protect Environment Files">
+    - Add `.env` to `.gitignore`
+    - Never commit secrets to version control
+    - Use different `.env` files for each environment
+    - Set restrictive file permissions: `chmod 600 .env`
+  </Accordion>
+
+  <Accordion title="Rotate Secrets Regularly">
+    - Change JWT_SECRET periodically (will invalidate existing tokens)
+    - Rotate Redis password with zero downtime using Redis ACL
+    - Update OAuth secrets if compromised
+  </Accordion>
+
+  <Accordion title="Use Secrets Management">
+    For production deployments, consider using:
+    - AWS Secrets Manager
+    - HashiCorp Vault
+    - Docker Secrets
+    - Kubernetes Secrets
+  </Accordion>
+</AccordionGroup>
+
+## Environment Variable Loading
+
+Better Uptime loads environment variables in this order:
+
+1. **System environment variables** (highest priority)
+2. **`.env` file in project root**
+3. **`packages/config/.env`**
+4. **Default values** (lowest priority)
+
+<Tip>
+  Place your `.env` file in the project root for simplest configuration.
+</Tip>
+
+## Docker-Specific Notes
+
+### Service Networking
+
+When running in Docker:
+
+```bash
+# Backend connects to Redis using service name
+REDIS_HOST=redis  # Not localhost or 127.0.0.1
+
+# Frontend connects to backend using service name
+NEXT_PUBLIC_BACKEND_URL=http://backend:8084
+```
+
+### Host Access
+
+For services running on the host to connect to Docker Redis:
+
+```bash
+REDIS_HOST=127.0.0.1  # or localhost
+REDIS_PORT=6379       # Ensure port is exposed
+```
+
+### Volume Mounts (Development)
+
+Development configuration mounts source code:
+
+- Hot reload works automatically
+- Changes persist across container restarts
+- No need to set additional environment variables
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Environment Variables Not Loading">
+    1. Check file location (project root or `packages/config/`)
+    2. Verify file is named exactly `.env` (not `env.txt` or `.env.local`)
+    3. Ensure no syntax errors (no spaces around `=`)
+    4. Restart services after changing `.env`
+  </Accordion>
+
+  <Accordion title="Redis Connection Failed">
+    1. Verify `REDIS_HOST` is correct for your environment
+    2. Check `REDIS_PASSWORD` matches Redis configuration
+    3. Ensure Redis port is exposed (Docker)
+    4. Test connection: `redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD ping`
+  </Accordion>
+
+  <Accordion title="Backend URL Not Working">
+    1. Check `NEXT_PUBLIC_BACKEND_URL` is set
+    2. Verify URL is accessible from browser
+    3. Ensure backend service is running
+    4. Check for CORS issues in browser console
+  </Accordion>
+
+  <Accordion title="JWT Token Issues">
+    1. Verify `JWT_SECRET` is set and consistent across services
+    2. Changing `JWT_SECRET` invalidates all existing tokens
+    3. Users will need to log in again after secret change
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Development Setup" icon="code" href="/deployment/docker-development">
+    Set up local development environment
+  </Card>
+  <Card title="Production Deployment" icon="rocket" href="/deployment/docker-production">
+    Deploy to production
+  </Card>
+  <Card title="Database Setup" icon="database" href="/deployment/database-setup">
+    Configure PostgreSQL database
+  </Card>
+</CardGroup>

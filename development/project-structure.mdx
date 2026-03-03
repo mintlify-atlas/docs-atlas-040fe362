@@ -1,0 +1,311 @@
+---
+title: Project Structure
+description: Understanding the Better Uptime monorepo organization
+---
+
+## Overview
+
+Better Uptime is organized as a **Turborepo monorepo** using **pnpm workspaces**. This structure enables code sharing, consistent tooling, and efficient builds across multiple applications and packages.
+
+## Root Structure
+
+```
+better-uptime/
+├── apps/                   # Application packages
+├── packages/               # Shared packages
+├── tooling/               # Development tooling
+├── docker/                # Docker configurations
+├── .github/               # GitHub workflows
+├── package.json           # Root package configuration
+├── pnpm-workspace.yaml    # Workspace definition
+├── turbo.json             # Turborepo configuration
+└── vitest.workspace.ts    # Test configuration
+```
+
+## Apps Directory
+
+The `apps/` directory contains the main applications:
+
+### apps/client
+
+**Next.js 16** frontend application
+
+```
+apps/client/
+├── app/                   # Next.js app directory
+├── public/               # Static assets
+├── package.json          # Client dependencies
+└── next.config.js        # Next.js configuration
+```
+
+**Key features:**
+- React 19 with Next.js App Router
+- tRPC client with React Query
+- Tailwind CSS + HeroUI components
+- MDX support for content
+
+**Scripts:**
+- `dev` - Next.js development server
+- `build` - Production build
+- `start` - Start production server
+- `lint` - Run ESLint
+
+### apps/server
+
+**Bun + tRPC** API server
+
+```
+apps/server/
+├── src/
+│   ├── bin.ts           # Server entry point
+│   └── index.ts         # tRPC router exports
+└── package.json
+```
+
+**Features:**
+- Bun runtime for performance
+- tRPC API with type safety
+- CORS enabled
+- Hot reload in development
+
+**Scripts:**
+- `dev` - Bun with hot reload
+- `start` - Production server
+
+### apps/worker
+
+**Background job processor**
+
+```
+apps/worker/
+├── src/
+│   └── index.ts
+└── package.json
+```
+
+Handles asynchronous tasks like:
+- Website uptime checks
+- Alert notifications
+- Data aggregation
+
+### apps/publisher
+
+**Event publishing service**
+
+```
+apps/publisher/
+├── src/
+│   └── index.ts
+└── package.json
+```
+
+Manages event streams and real-time updates.
+
+## Packages Directory
+
+Shared packages used across applications:
+
+### @repo/api
+
+**tRPC router definitions and business logic**
+
+```
+packages/api/
+├── src/
+│   ├── routes/          # API route handlers
+│   ├── __tests__/       # Bun tests
+│   ├── index.ts         # Router exports
+│   └── trpc.ts          # tRPC configuration
+└── package.json
+```
+
+**Test runner:** Bun's native test runner
+
+```json
+"scripts": {
+  "test": "bun test",
+  "test:watch": "bun test --watch",
+  "test:coverage": "bun test --coverage"
+}
+```
+
+### @repo/validators
+
+**Zod schema validators**
+
+```
+packages/validators/
+├── src/
+│   ├── user/            # User schemas
+│   ├── website/         # Website schemas
+│   ├── __tests__/       # Vitest tests
+│   └── index.ts
+├── vitest.config.ts
+└── package.json
+```
+
+**Test runner:** Vitest
+
+### @repo/store
+
+**Prisma database client**
+
+```
+packages/store/
+├── prisma/
+│   └── schema.prisma    # Database schema
+└── src/
+```
+
+Provides type-safe database access across the application.
+
+### @repo/clickhouse
+
+**ClickHouse client for time-series data**
+
+```
+packages/clickhouse/
+└── src/
+    └── index.ts
+```
+
+Handles analytics and time-series metrics storage.
+
+### @repo/streams
+
+**Redis streams for real-time data**
+
+```
+packages/streams/
+└── src/
+    └── index.ts
+```
+
+Manages event streams and pub/sub patterns.
+
+### @repo/config
+
+**Shared configuration**
+
+```
+packages/config/
+└── src/
+```
+
+Environment variables and shared constants.
+
+### @repo/ui
+
+**Shared React components**
+
+```
+packages/ui/
+└── src/
+    └── components/
+```
+
+Reusable UI components for the client app.
+
+## Tooling Directory
+
+Development tooling packages:
+
+```
+tooling/
+├── eslint-config/       # Shared ESLint configuration
+└── typescript-config/   # Shared TypeScript configs
+```
+
+## Workspace Configuration
+
+### pnpm-workspace.yaml
+
+```yaml
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "tooling/*"
+```
+
+Defines which directories contain workspace packages.
+
+### Package References
+
+Internal packages use workspace protocol:
+
+```json
+{
+  "dependencies": {
+    "@repo/api": "workspace:*",
+    "@repo/config": "workspace:^"
+  }
+}
+```
+
+- `workspace:*` - Use current workspace version
+- `workspace:^` - Use compatible workspace version
+
+## Turborepo Configuration
+
+### turbo.json
+
+Defines task dependencies and caching:
+
+```json
+{
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "cache": false
+    }
+  }
+}
+```
+
+**Key features:**
+- Task pipelines with dependencies
+- Output caching for builds
+- Global environment variables
+- TUI mode for better visibility
+
+### Global Environment Variables
+
+```json
+"globalEnv": ["PORT", "JWT_SECRET", "DATABASE_URL"]
+```
+
+These variables are available to all tasks.
+
+## Tech Stack Summary
+
+| Layer | Technology |
+|-------|------------|
+| **Monorepo** | Turborepo + pnpm workspaces |
+| **Frontend** | Next.js 16 + React 19 |
+| **API** | tRPC + Zod validation |
+| **Runtime** | Bun (server) + Node.js (client) |
+| **Database** | PostgreSQL (Prisma) |
+| **Time-Series** | ClickHouse |
+| **Streams** | Redis |
+| **Testing** | Vitest + Bun Test |
+| **Styling** | Tailwind CSS + HeroUI |
+| **Type Safety** | TypeScript 5.9 |
+
+## Navigation
+
+For local navigation between packages, use TypeScript's path mapping:
+
+```typescript
+import { api } from "@repo/api";
+import { userSchema } from "@repo/validators/user";
+```
+
+All package exports are defined in their `package.json` exports field.

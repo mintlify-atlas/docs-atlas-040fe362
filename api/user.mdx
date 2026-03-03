@@ -1,0 +1,243 @@
+---
+title: User Endpoints
+description: Authentication and user management endpoints
+---
+
+## signup
+
+Register a new user account. Sends a verification email to the provided address.
+
+### Input Parameters
+
+<ParamField path="email" type="string" required>
+  Valid email address (5-40 characters)
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  Password (8-24 characters). Must contain:
+  - At least one uppercase letter
+  - At least one lowercase letter
+  - At least one number
+  - At least one special character (!@#$%^&amp;*()_+-=[]{};\':\"|,.&lt;&gt;/?)
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message asking user to check their email
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The email address that was registered
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.user.signup.mutate({
+  email: "user@example.com",
+  password: "SecurePass123!"
+});
+
+console.log(result.message); // "Please check your email to verify your account"
+```
+
+```json Response
+{
+  "message": "Please check your email to verify your account",
+  "email": "user@example.com"
+}
+```
+</CodeGroup>
+
+---
+
+## verifyEmail
+
+Verify a user's email address using the token sent via email.
+
+### Input Parameters
+
+<ParamField path="token" type="string" required>
+  Verification token from the email
+</ParamField>
+
+### Response
+
+<ResponseField name="token" type="string">
+  JWT authentication token (expires in 1 hour)
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.user.verifyEmail.mutate({
+  token: "verification-token-from-email"
+});
+
+console.log(result.token); // JWT token
+```
+
+```json Response
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+</CodeGroup>
+
+---
+
+## resendVerification
+
+Resend the email verification link to a user.
+
+### Input Parameters
+
+<ParamField path="email" type="string" required>
+  Email address to resend verification to
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Confirmation message (doesn't reveal if account exists for security)
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.user.resendVerification.mutate({
+  email: "user@example.com"
+});
+```
+
+```json Response
+{
+  "message": "If an account exists, a verification email has been sent"
+}
+```
+</CodeGroup>
+
+---
+
+## login
+
+Authenticate with email and password.
+
+### Input Parameters
+
+<ParamField path="email" type="string" required>
+  User's email address
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  User's password
+</ParamField>
+
+### Response
+
+<ResponseField name="token" type="string">
+  JWT authentication token (expires in 1 hour)
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.user.login.mutate({
+  email: "user@example.com",
+  password: "SecurePass123!"
+});
+
+console.log(result.token);
+```
+
+```json Response
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `NOT_FOUND` - User not found or invalid credentials
+- `FORBIDDEN` - Email not verified yet
+- `UNAUTHORIZED` - Invalid password
+
+---
+
+## githubAuth
+
+Authenticate using GitHub OAuth.
+
+### Input Parameters
+
+<ParamField path="code" type="string" required>
+  Authorization code from GitHub OAuth flow
+</ParamField>
+
+<ParamField path="state" type="string">
+  Optional state parameter for CSRF protection
+</ParamField>
+
+### Response
+
+<ResponseField name="token" type="string">
+  JWT authentication token (expires in 1 hour)
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.user.githubAuth.mutate({
+  code: "github-oauth-code",
+  state: "csrf-token"
+});
+
+console.log(result.token);
+```
+
+```json Response
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+</CodeGroup>
+
+---
+
+## me
+
+Get the authenticated user's profile information.
+
+<Note>This endpoint requires authentication.</Note>
+
+### Response
+
+<ResponseField name="id" type="string">
+  User's unique identifier
+</ResponseField>
+
+<ResponseField name="email" type="string | null">
+  User's email address
+</ResponseField>
+
+<ResponseField name="name" type="string | null">
+  User's display name
+</ResponseField>
+
+<ResponseField name="avatarUrl" type="string | null">
+  URL to user's avatar image
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const user = await trpc.user.me.query();
+
+console.log(user.email);
+```
+
+```json Response
+{
+  "id": "clx1234567890",
+  "email": "user@example.com",
+  "name": "John Doe",
+  "avatarUrl": "https://avatars.githubusercontent.com/u/123456"
+}
+```
+</CodeGroup>

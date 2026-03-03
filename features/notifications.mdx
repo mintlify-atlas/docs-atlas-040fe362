@@ -1,0 +1,406 @@
+---
+title: 'Notifications'
+description: 'Get notified via email when your monitors go down or recover'
+icon: 'bell'
+---
+
+## Overview
+
+Better Uptime sends email notifications to keep you informed about your monitor status changes. The notification system uses Resend for reliable email delivery.
+
+<Info>
+All email notifications are sent from `auth@updates.raashed.xyz` using Resend's email API.
+</Info>
+
+## Email Notifications via Resend
+
+Better Uptime uses [Resend](https://resend.com) as the email delivery service.
+
+### Email Configuration
+
+```typescript packages/api/src/email.ts
+import { Resend } from "resend";
+import { RESEND_API_KEY } from "@repo/config";
+import { FRONTEND_URL } from "@repo/config/constants";
+
+const resend = new Resend(RESEND_API_KEY);
+```
+
+### Sending Verification Emails
+
+The primary notification function sends email verification links:
+
+```typescript packages/api/src/email.ts
+export async function sendVerificationEmail(
+  email: string,
+  token: string,
+): Promise<{ success: boolean; error?: string }> {
+  const verificationUrl = `${FRONTEND_URL}/auth/verify-email?token=${token}`;
+
+  try {
+    const { error } = await resend.emails.send({
+      from: "auth@updates.raashed.xyz",
+      to: email,
+      subject: "Verify your email address",
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px 20px; background-color: #f9fafb;">
+            <div style="max-width: 480px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+              <h1 style="margin: 0 0 24px; font-size: 24px; font-weight: 600; color: #111827;">
+                Verify your email
+              </h1>
+              <p style="margin: 0 0 24px; font-size: 16px; line-height: 1.5; color: #4b5563;">
+                Thanks for signing up at <b>rshdhere technologies</b>! Please click the button below to verify your email address.
+              </p>
+              <a href="${verificationUrl}" style="display: inline-block; padding: 12px 24px; background-color: #111827; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">
+                Verify Email
+              </a>
+              <p style="margin: 24px 0 0; font-size: 14px; line-height: 1.5; color: #6b7280;">
+                If you didn't create an account, you can safely ignore this email.
+              </p>
+              <p style="margin: 16px 0 0; font-size: 12px; color: #9ca3af;">
+                This link will expire in 24 hours.
+              </p>
+            </div>
+          </body>
+        </html>
+      `,
+    });
+
+    if (error) {
+      console.error("Failed to send verification email:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Error sending verification email:", err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Failed to send email",
+    };
+  }
+}
+```
+
+## Email Template Design
+
+The email templates use inline styles for broad email client compatibility:
+
+### Design Principles
+
+<CardGroup cols={2}>
+  <Card title="Responsive" icon="mobile">
+    Max-width container adapts to mobile and desktop
+  </Card>
+  
+  <Card title="Accessible" icon="universal-access">
+    Semantic HTML with proper meta tags
+  </Card>
+  
+  <Card title="Clean Design" icon="paintbrush">
+    Minimal, professional styling with clear CTAs
+  </Card>
+  
+  <Card title="System Fonts" icon="font">
+    Uses system font stack for fast rendering
+  </Card>
+</CardGroup>
+
+### Template Structure
+
+```html
+<!-- Container -->
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px 20px; background-color: #f9fafb;">
+  
+  <!-- Card -->
+  <div style="max-width: 480px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+    
+    <!-- Heading -->
+    <h1 style="margin: 0 0 24px; font-size: 24px; font-weight: 600; color: #111827;">
+      Verify your email
+    </h1>
+    
+    <!-- Body Text -->
+    <p style="margin: 0 0 24px; font-size: 16px; line-height: 1.5; color: #4b5563;">
+      Thanks for signing up at <b>rshdhere technologies</b>! Please click the button below to verify your email address.
+    </p>
+    
+    <!-- CTA Button -->
+    <a href="${verificationUrl}" style="display: inline-block; padding: 12px 24px; background-color: #111827; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">
+      Verify Email
+    </a>
+    
+    <!-- Footer -->
+    <p style="margin: 24px 0 0; font-size: 14px; line-height: 1.5; color: #6b7280;">
+      If you didn't create an account, you can safely ignore this email.
+    </p>
+    
+    <!-- Expiration Notice -->
+    <p style="margin: 16px 0 0; font-size: 12px; color: #9ca3af;">
+      This link will expire in 24 hours.
+    </p>
+  </div>
+</body>
+```
+
+## Notification Triggers
+
+Notifications are triggered based on monitor status changes detected by the worker service.
+
+### Status Change Detection
+
+Workers continuously monitor websites and detect status changes:
+
+```typescript apps/worker/src/index.ts
+async function checkWebsite(
+  url: string,
+  websiteId: string,
+): Promise<UptimeEventRecord> {
+  const startTime = Date.now();
+  let status: UptimeStatus = "DOWN";
+  let httpStatus: number | undefined;
+
+  try {
+    const res = await axios.get(url, {
+      maxRedirects: 5,
+      validateStatus: () => true,
+      headers: {
+        "User-Agent":
+          "Uptique/1.0 (Uptime Monitor; https://uptique.raashed.xyz)",
+      },
+    });
+
+    httpStatus = res.status;
+    status = typeof httpStatus === "number" && httpStatus < 500 ? "UP" : "DOWN";
+  } catch (error) {
+    // Network error - status remains DOWN
+  }
+
+  return {
+    websiteId,
+    regionId: REGION_ID,
+    status,
+    responseTimeMs: Date.now() - startTime,
+    httpStatusCode: httpStatus,
+    checkedAt: new Date(),
+  };
+}
+```
+
+### Notification Logic
+
+Notifications should be triggered when:
+
+1. **Monitor goes DOWN**: HTTP status ≥ 500 or network error
+2. **Monitor recovers (UP)**: HTTP status < 500 after being DOWN
+3. **Sustained outage**: Monitor remains DOWN for multiple checks
+
+<Warning>
+Currently, the codebase includes email verification functionality. Status change notifications would be implemented by comparing previous and current status in the worker's processing loop.
+</Warning>
+
+## Implementing Status Notifications
+
+To add status change notifications, you would extend the email service:
+
+```typescript
+// Proposed implementation
+export async function sendDowntimeAlert(
+  email: string,
+  website: { name: string; url: string },
+  incident: { status: string; httpStatusCode?: number; responseTimeMs?: number }
+): Promise<{ success: boolean; error?: string }> {
+  const dashboardUrl = `${FRONTEND_URL}/dashboard/incidents`;
+
+  try {
+    const { error } = await resend.emails.send({
+      from: "alerts@updates.raashed.xyz",
+      to: email,
+      subject: `🚨 ${website.name} is DOWN`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px 20px; background-color: #f9fafb;">
+            <div style="max-width: 480px; margin: 0 auto; background: white; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+              <h1 style="margin: 0 0 24px; font-size: 24px; font-weight: 600; color: #dc2626;">
+                ⚠️ ${website.name} is DOWN
+              </h1>
+              <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.5; color: #4b5563;">
+                Your monitor <b>${website.name}</b> is currently experiencing downtime.
+              </p>
+              <div style="background: #fef2f2; border: 1px solid #fee2e2; border-radius: 6px; padding: 16px; margin: 0 0 24px;">
+                <p style="margin: 0 0 8px; font-size: 14px; color: #991b1b;"><b>URL:</b> ${website.url}</p>
+                <p style="margin: 0 0 8px; font-size: 14px; color: #991b1b;"><b>Status:</b> ${incident.status}</p>
+                ${incident.httpStatusCode ? `<p style="margin: 0; font-size: 14px; color: #991b1b;"><b>HTTP Status:</b> ${incident.httpStatusCode}</p>` : ''}
+              </div>
+              <a href="${dashboardUrl}" style="display: inline-block; padding: 12px 24px; background-color: #dc2626; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 14px;">
+                View Dashboard
+              </a>
+            </div>
+          </body>
+        </html>
+      `,
+    });
+
+    if (error) {
+      console.error("Failed to send downtime alert:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Error sending downtime alert:", err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Failed to send email",
+    };
+  }
+}
+```
+
+## Error Handling
+
+The email service includes comprehensive error handling:
+
+```typescript packages/api/src/email.ts
+try {
+  const { error } = await resend.emails.send({...});
+
+  if (error) {
+    console.error("Failed to send verification email:", error);
+    return { success: false, error: error.message };
+  }
+
+  return { success: true };
+} catch (err) {
+  console.error("Error sending verification email:", err);
+  return {
+    success: false,
+    error: err instanceof Error ? err.message : "Failed to send email",
+  };
+}
+```
+
+<Info>
+Email failures are logged but don't crash the application. The system returns detailed error messages for debugging.
+</Info>
+
+## Email Configuration
+
+### Environment Variables
+
+```bash
+RESEND_API_KEY=re_xxxxxxxxxxxxx
+FRONTEND_URL=https://yourapp.com
+```
+
+### Required Configuration
+
+<ParamField path="RESEND_API_KEY" type="string" required>
+  Your Resend API key from https://resend.com/api-keys
+</ParamField>
+
+<ParamField path="FRONTEND_URL" type="string" required>
+  Base URL for your application (used in email links)
+</ParamField>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Email Deliverability">
+    **Improve deliverability:**
+    - Verify your sending domain in Resend
+    - Set up SPF, DKIM, and DMARC records
+    - Use a recognizable "from" name
+    - Include unsubscribe links for transactional emails
+  </Accordion>
+
+  <Accordion title="Rate Limiting">
+    **Prevent email spam:**
+    - Implement cooldown periods between alerts
+    - Batch multiple status changes into digest emails
+    - Allow users to configure notification frequency
+    - Respect user notification preferences
+  </Accordion>
+
+  <Accordion title="Template Testing">
+    **Test email templates:**
+    - Use [Litmus](https://litmus.com) or [Email on Acid](https://www.emailonacid.com)
+    - Test in Gmail, Outlook, Apple Mail
+    - Verify mobile responsiveness
+    - Check dark mode rendering
+  </Accordion>
+
+  <Accordion title="Error Monitoring">
+    **Track email delivery:**
+    - Log all email send attempts
+    - Monitor Resend webhook events
+    - Track bounce and complaint rates
+    - Alert on high failure rates
+  </Accordion>
+</AccordionGroup>
+
+## Notification Types
+
+<CardGroup cols={2}>
+  <Card title="Verification Emails" icon="envelope-circle-check">
+    Sent when users sign up to verify their email address
+  </Card>
+  
+  <Card title="Downtime Alerts" icon="triangle-exclamation">
+    (To be implemented) Notify when monitors go DOWN
+  </Card>
+  
+  <Card title="Recovery Notifications" icon="circle-check">
+    (To be implemented) Notify when monitors recover
+  </Card>
+  
+  <Card title="Incident Reports" icon="file-lines">
+    (To be implemented) Summarize incidents with metrics
+  </Card>
+</CardGroup>
+
+## Testing Emails Locally
+
+During development, use Resend's test mode:
+
+```typescript
+// For testing, send to your own email
+if (process.env.NODE_ENV === 'development') {
+  recipient = process.env.DEV_TEST_EMAIL || email;
+}
+
+await resend.emails.send({
+  from: "auth@updates.raashed.xyz",
+  to: recipient,
+  subject: "[TEST] Verify your email address",
+  // ...
+});
+```
+
+<Tip>
+Resend provides a generous free tier with 3,000 emails per month, perfect for development and small production workloads.
+</Tip>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Uptime Monitoring" icon="chart-line" href="/features/uptime-monitoring">
+    Learn how the monitoring system detects downtime
+  </Card>
+  <Card title="Status Pages" icon="browser" href="/features/status-pages">
+    Share status publicly with your users
+  </Card>
+  <Card title="Resend Docs" icon="book" href="https://resend.com/docs">
+    Official Resend API documentation
+  </Card>
+  <Card title="Email Best Practices" icon="envelope" href="https://resend.com/docs/dashboard/emails/best-practices">
+    Resend's guide to email deliverability
+  </Card>
+</CardGroup>

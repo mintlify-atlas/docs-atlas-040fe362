@@ -1,0 +1,518 @@
+---
+title: 'Custom Domains'
+description: 'Configure custom domains for your status pages with DNS verification'
+icon: 'globe'
+---
+
+## Overview
+
+Custom domains allow you to host your status pages on your own domain (e.g., `status.yourcompany.com`) instead of the default Better Uptime URL.
+
+<Steps>
+  <Step title="Request Verification">
+    Initiate domain verification and receive DNS records to configure
+  </Step>
+  
+  <Step title="Configure DNS">
+    Add CNAME and TXT records to your DNS provider
+  </Step>
+  
+  <Step title="Verify Domain">
+    Trigger verification to confirm DNS records are correct
+  </Step>
+  
+  <Step title="Publish">
+    Your status page is now accessible on your custom domain
+  </Step>
+</Steps>
+
+## Domain Verification Process
+
+### Step 1: Request Verification
+
+Initiate the verification process for your custom domain:
+
+```typescript
+const verification = await trpc.statusDomain.requestVerification.mutate({
+  statusPageId: "your-status-page-id",
+  hostname: "status.example.com",
+});
+
+console.log(verification);
+```
+
+**Response:**
+```json
+{
+  "statusPageId": "...",
+  "hostname": "status.example.com",
+  "verificationStatus": "PENDING",
+  "cnameRecordName": "status.example.com",
+  "cnameRecordValue": "status.uptique.app",
+  "txtRecordName": "_uptique-verify.status.example.com",
+  "txtRecordValue": "uptique-a1b2c3d4e5f6..."
+}
+```
+
+Implementation:
+
+```typescript packages/api/src/routes/status-domain.ts
+requestVerification: protectedProcedure
+  .input(requestStatusDomainVerificationInput)
+  .output(requestStatusDomainVerificationOutput)
+  .mutation(async ({ ctx, input }) => {
+    const userId = ctx.user.userId;
+    const { statusPageId, hostname } = input;
+
+    // Verify status page exists and belongs to user
+    const statusPage = await prismaClient.statusPage.findFirst({
+      where: {
+        id: statusPageId,
+        userId,
+      },
+    });
+
+    if (!statusPage) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Status page not found",
+      });
+    }
+
+    // Check if hostname is already claimed
+    const existingHostname = await prismaClient.statusPageDomain.findUnique({
+      where: {
+        hostname,
+      },
+    });
+
+    if (existingHostname && existingHostname.statusPageId !== statusPageId) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "Hostname is already claimed by another status page",
+      });
+    }
+
+    // Generate unique verification token
+    const verificationToken = createVerificationToken();
+
+    // Upsert domain record
+    const domain = await prismaClient.statusPageDomain.upsert({
+      where: {
+        statusPageId,
+      },
+      update: {
+        hostname,
+        verificationToken,
+        verificationStatus: "PENDING",
+        verifiedAt: null,
+      },
+      create: {
+        statusPageId,
+        hostname,
+        verificationToken,
+        verificationStatus: "PENDING",
+      },
+    });
+
+    return {
+      statusPageId: domain.statusPageId,
+      hostname: domain.hostname,
+      verificationStatus: domain.verificationStatus,
+      ...getDnsRecords(domain.hostname, domain.verificationToken),
+    };
+  }),
+```
+
+### Verification Token Generation
+
+Each domain gets a unique verification token:
+
+```typescript packages/api/src/routes/status-domain.ts
+function createVerificationToken(): string {
+  return `uptique-${crypto.randomUUID().replace(/-/g, "")}`;
+}
+```
+
+<Warning>
+Hostnames are globally unique. You cannot claim a hostname that's already in use by another status page.
+</Warning>
+
+### Step 2: DNS Configuration
+
+Add these DNS records to your domain provider:
+
+<CodeGroup>
+
+```dns CNAME Record
+Type: CNAME
+Name: status.example.com
+Value: status.uptique.app
+TTL: 3600 (or automatic)
+```
+
+```dns TXT Record
+Type: TXT
+Name: _uptique-verify.status.example.com
+Value: uptique-a1b2c3d4e5f6...
+TTL: 3600 (or automatic)
+```
+
+</CodeGroup>
+
+**DNS Record Configuration:**
+
+```typescript packages/api/src/routes/status-domain.ts
+function getDnsRecords(hostname: string, verificationToken: string) {
+  return {
+    cnameRecordName: hostname,
+    cnameRecordValue: STATUS_PAGE_CNAME_TARGET,
+    txtRecordName: `${STATUS_PAGE_VERIFY_TXT_PREFIX}.${hostname}`,
+    txtRecordValue: verificationToken,
+  };
+}
+```
+
+From configuration constants:
+
+```typescript packages/config/src/constants.ts
+export const STATUS_PAGE_CNAME_TARGET = "status.uptique.app";
+export const STATUS_PAGE_VERIFY_TXT_PREFIX = "_uptique-verify";
+```
+
+<Info>
+DNS propagation can take anywhere from a few minutes to 48 hours depending on your provider.
+</Info>
+
+### Step 3: Verify Domain
+
+Once DNS records are configured, trigger verification:
+
+```typescript
+const result = await trpc.statusDomain.verify.mutate({
+  statusPageId: "your-status-page-id",
+  hostname: "status.example.com",
+});
+
+console.log(result.verificationStatus); // "VERIFIED" or "FAILED"
+```
+
+Verification checks both CNAME and TXT records:
+
+```typescript packages/api/src/routes/status-domain.ts
+verify: protectedProcedure
+  .input(verifyStatusDomainInput)
+  .output(verifyStatusDomainOutput)
+  .mutation(async ({ ctx, input }) => {
+    const userId = ctx.user.userId;
+    const { statusPageId, hostname } = input;
+
+    const domain = await prismaClient.statusPageDomain.findFirst({
+      where: {
+        statusPageId,
+        hostname,
+        statusPage: {
+          userId,
+        },
+      },
+    });
+
+    if (!domain) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Domain mapping not found",
+      });
+    }
+
+    const dnsRecords = getDnsRecords(
+      domain.hostname,
+      domain.verificationToken,
+    );
+
+    // Query DNS records from multiple resolvers
+    const [txtValues, cnameValues] = await Promise.all([
+      resolveTxtValues(dnsRecords.txtRecordName),
+      resolveCnameValues(dnsRecords.cnameRecordName),
+    ]);
+
+    // Check verification
+    const txtVerified = txtValues.includes(dnsRecords.txtRecordValue);
+    const cnameVerified = cnameValues.includes(
+      normalizeDnsValue(dnsRecords.cnameRecordValue),
+    );
+    const verificationPassed = txtVerified && cnameVerified;
+
+    // Update domain status
+    const updatedDomain = await prismaClient.statusPageDomain.update({
+      where: {
+        id: domain.id,
+      },
+      data: {
+        verificationStatus: verificationPassed ? "VERIFIED" : "FAILED",
+        verifiedAt: verificationPassed ? new Date() : null,
+      },
+    });
+
+    return {
+      statusPageId: updatedDomain.statusPageId,
+      hostname: updatedDomain.hostname,
+      verificationStatus: updatedDomain.verificationStatus,
+      txtVerified,
+      cnameVerified,
+      verifiedAt: updatedDomain.verifiedAt,
+      ...dnsRecords,
+    };
+  }),
+```
+
+## DNS Resolution
+
+### Multi-Resolver Strategy
+
+Better Uptime queries multiple DNS resolvers for reliability:
+
+```typescript packages/api/src/routes/status-domain.ts
+const PUBLIC_DNS_RESOLVERS = ["1.1.1.1", "8.8.8.8"] as const;
+const dnsResolvers = PUBLIC_DNS_RESOLVERS.map((server) => {
+  const resolver = new Resolver();
+  resolver.setServers([server]);
+  return resolver;
+});
+```
+
+### TXT Record Resolution
+
+```typescript packages/api/src/routes/status-domain.ts
+async function resolveTxtValues(hostname: string): Promise<string[]> {
+  const values = new Set<string>();
+  const lookupAttempts = [
+    () => resolveTxt(hostname),
+    ...dnsResolvers.map((resolver) => () => resolver.resolveTxt(hostname)),
+  ];
+
+  for (const lookup of lookupAttempts) {
+    try {
+      const records = await lookup();
+      for (const value of records.flat()) {
+        values.add(value.trim());
+      }
+    } catch (error) {
+      // DNS propagation and transient resolver issues are non-fatal
+      if (isRecoverableDnsError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return [...values];
+}
+```
+
+### CNAME Record Resolution
+
+```typescript packages/api/src/routes/status-domain.ts
+async function resolveCnameValues(hostname: string): Promise<string[]> {
+  const values = new Set<string>();
+  const lookupAttempts = [
+    () => resolveCname(hostname),
+    ...dnsResolvers.map((resolver) => () => resolver.resolveCname(hostname)),
+  ];
+
+  for (const lookup of lookupAttempts) {
+    try {
+      const records = await lookup();
+      for (const value of records) {
+        values.add(normalizeDnsValue(value));
+      }
+    } catch (error) {
+      if (isRecoverableDnsError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return [...values];
+}
+```
+
+### DNS Value Normalization
+
+```typescript packages/api/src/routes/status-domain.ts
+function normalizeDnsValue(value: string): string {
+  return value.trim().toLowerCase().replace(/\.$/, "");
+}
+```
+
+<Info>
+DNS resolution is attempted across multiple resolvers to handle propagation delays and transient failures.
+</Info>
+
+## Recoverable DNS Errors
+
+Certain DNS errors are expected during propagation:
+
+```typescript packages/api/src/routes/status-domain.ts
+function isRecoverableDnsError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
+  }
+
+  const code = error.code;
+  return (
+    code === "ENODATA" ||
+    code === "ENOTFOUND" ||
+    code === "EAI_AGAIN" ||
+    code === "SERVFAIL" ||
+    code === "ETIMEOUT" ||
+    code === "ECONNREFUSED"
+  );
+}
+```
+
+## TLS Certificate Issuance
+
+Before issuing TLS certificates, verify the domain is ready:
+
+```typescript
+const { allowed } = await trpc.statusDomain.canIssueTls.query({
+  hostname: "status.example.com",
+});
+
+if (allowed) {
+  // Proceed with TLS certificate issuance
+}
+```
+
+Implementation:
+
+```typescript packages/api/src/routes/status-domain.ts
+canIssueTls: publicProcedure
+  .input(canIssueTlsInput)
+  .output(canIssueTlsOutput)
+  .query(async ({ input }) => {
+    const domain = await prismaClient.statusPageDomain.findFirst({
+      where: {
+        hostname: input.hostname,
+        verificationStatus: "VERIFIED",
+        statusPage: {
+          isPublished: true,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    return {
+      allowed: Boolean(domain),
+    };
+  }),
+```
+
+<Warning>
+TLS certificates can only be issued for domains that are:
+1. Verified (`verificationStatus: "VERIFIED"`)
+2. Associated with a published status page (`isPublished: true`)
+</Warning>
+
+## Verification Status
+
+Domains can have three verification states:
+
+<ParamField path="PENDING" type="status">
+  Initial state after requesting verification. DNS records need to be configured.
+</ParamField>
+
+<ParamField path="VERIFIED" type="status">
+  Both CNAME and TXT records are correctly configured and verified.
+</ParamField>
+
+<ParamField path="FAILED" type="status">
+  Verification was attempted but DNS records are incorrect or missing.
+</ParamField>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Verification Keeps Failing">
+    **Possible causes:**
+    - DNS records not yet propagated (wait 5-60 minutes)
+    - Incorrect record values (copy-paste carefully)
+    - TXT record missing the `_uptique-verify` prefix
+    - CNAME points to wrong target
+    
+    **Debug:**
+    ```bash
+    # Check CNAME
+    dig status.example.com CNAME
+    
+    # Check TXT
+    dig _uptique-verify.status.example.com TXT
+    ```
+  </Accordion>
+
+  <Accordion title="Hostname Already Claimed">
+    If you get a `CONFLICT` error, the hostname is being used by another status page.
+    
+    You can only claim a hostname if:
+    - It's not currently in use, OR
+    - You're updating your own status page's domain
+  </Accordion>
+
+  <Accordion title="DNS Propagation Taking Too Long">
+    DNS propagation typically takes:
+    - Cloudflare: 2-5 minutes
+    - Route53: 5-10 minutes
+    - Other providers: up to 48 hours
+    
+    You can verify propagation using online tools:
+    - https://dnschecker.org
+    - https://www.whatsmydns.net
+  </Accordion>
+</AccordionGroup>
+
+## Security Considerations
+
+<Info>
+The verification TXT record proves you control the domain. Never share your verification token publicly.
+</Info>
+
+**Security features:**
+
+1. **Unique verification tokens** - Each domain gets a unique `uptique-{uuid}` token
+2. **Global hostname locks** - One hostname can only be claimed once
+3. **User isolation** - Status pages can only be linked to domains owned by the same user
+4. **TLS requirements** - Certificates only issued for verified domains with published pages
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Subdomains" icon="sitemap">
+    Use `status.` subdomain rather than apex domains for easier DNS management.
+  </Card>
+  
+  <Card title="Lower TTL Before Changes" icon="clock">
+    Set DNS TTL to 300s (5 min) before verification for faster propagation.
+  </Card>
+  
+  <Card title="Verify Before Publishing" icon="check">
+    Verify your domain before setting `isPublished: true` on your status page.
+  </Card>
+  
+  <Card title="Monitor Expiration" icon="bell">
+    Set up monitoring for your custom domain's DNS records to catch issues early.
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Status Pages" icon="browser" href="/features/status-pages">
+    Learn about creating and managing status pages
+  </Card>
+  <Card title="Uptime Monitoring" icon="chart-line" href="/features/uptime-monitoring">
+    Understand the monitoring system
+  </Card>
+</CardGroup>

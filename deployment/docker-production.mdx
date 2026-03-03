@@ -1,0 +1,434 @@
+---
+title: 'Docker Production Deployment'
+description: 'Deploy Better Uptime to production with Docker Compose'
+---
+
+## Overview
+
+The production configuration is optimized for production deployments with multi-stage builds, resource limits, restart policies, and security best practices.
+
+## Production Features
+
+<CardGroup cols={2}>
+  <Card title="Optimized Builds" icon="bolt">
+    Multi-stage Docker builds for smaller images
+  </Card>
+  <Card title="Resource Limits" icon="gauge">
+    Memory limits and CPU constraints
+  </Card>
+  <Card title="Auto-restart" icon="rotate">
+    Automatic restart on failure
+  </Card>
+  <Card title="Security Hardened" icon="shield">
+    Strong passwords and security best practices
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+<Check>
+  - Docker and Docker Compose installed
+  - PostgreSQL database configured
+  - GitHub OAuth app created
+  - Resend API key for emails
+  - Strong passwords generated
+</Check>
+
+## Environment Configuration
+
+<Warning>
+  Always use strong, production-ready values. Never use development defaults in production.
+</Warning>
+
+Create a `.env` file with production values:
+
+```bash
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/database
+
+# Auth (REQUIRED - use strong secret)
+JWT_SECRET=your-strong-jwt-secret-here
+
+# GitHub OAuth
+CLIENT_ID_GITHUB=your-github-client-id
+CLIENT_SECRET_GITHUB=your-github-client-secret
+
+# Email (Resend)
+RESEND_API_KEY=your-resend-api-key
+
+# Redis Configuration (REQUIRED - use strong password)
+# IMPORTANT: Use 127.0.0.1 for PM2 services running on host
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_USERNAME=
+REDIS_PASSWORD=your-strong-redis-password  # REQUIRED
+
+# Backend
+BACKEND_PORT=8084
+
+# Frontend
+FRONTEND_PORT=3000
+NEXT_PUBLIC_BACKEND_URL=http://your-backend-url:8084
+
+# Worker Configuration
+REGION_ID=us-east-1
+WORKER_ID=worker-1
+
+# ClickHouse (optional)
+CLICKHOUSE_URL=
+CLICKHOUSE_USERNAME=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DATABASE=default
+CLICKHOUSE_METRICS_TABLE=uptime_checks
+```
+
+<Tip>
+  Generate a strong JWT secret using: `openssl rand -base64 32`
+</Tip>
+
+## Quick Start
+
+<Steps>
+  <Step title="Navigate to Docker directory">
+    ```bash
+    cd docker
+    ```
+  </Step>
+
+  <Step title="Build and start services">
+    ```bash
+    docker compose -f docker-compose.prod.yaml up --build -d
+    ```
+    
+    The `-d` flag runs services in detached mode (background).
+  </Step>
+
+  <Step title="Verify services are running">
+    ```bash
+    docker compose -f docker-compose.prod.yaml ps
+    ```
+    
+    All services should show as "Up" or "healthy".
+  </Step>
+
+  <Step title="Check logs">
+    ```bash
+    docker compose -f docker-compose.prod.yaml logs -f
+    ```
+    
+    Monitor logs for any errors or issues.
+  </Step>
+</Steps>
+
+## Service Details
+
+### Redis
+
+<ParamField path="Image" type="string" default="redis:7-alpine">
+  Lightweight Alpine-based Redis 7 image
+</ParamField>
+
+<ParamField path="Port" type="number" default="6379">
+  Exposed to host for external connections
+</ParamField>
+
+<ParamField path="Volume" type="string" default="redis-data">
+  Persistent storage for Redis data
+</ParamField>
+
+**Configuration:**
+- Password protected (via `REDIS_PASSWORD`)
+- AOF (Append Only File) persistence enabled
+- Memory limit: 256MB with LRU eviction policy
+- Health checks configured
+
+### Backend
+
+<ParamField path="Runtime" type="string" default="Bun">
+  High-performance JavaScript runtime
+</ParamField>
+
+<ParamField path="Port" type="number" default="8084">
+  Configurable via `BACKEND_PORT`
+</ParamField>
+
+**Features:**
+- Production-optimized build
+- tRPC API endpoints
+- Depends on Redis health check
+- Auto-restart on failure
+
+### Frontend
+
+<ParamField path="Runtime" type="string" default="Node.js">
+  Next.js application
+</ParamField>
+
+<ParamField path="Port" type="number" default="3000">
+  Configurable via `FRONTEND_PORT`
+</ParamField>
+
+**Features:**
+- Standalone build for smaller image size
+- Production-optimized
+- Depends on Backend service
+
+### Worker
+
+<ParamField path="Runtime" type="string" default="Bun">
+  Processes uptime checks from Redis streams
+</ParamField>
+
+**Features:**
+- Consumes messages from Redis streams
+- Performs uptime checks
+- Reports results to ClickHouse (optional)
+- Auto-restart on failure
+
+### Publisher
+
+<ParamField path="Runtime" type="string" default="Bun">
+  Publishes website checks to Redis streams
+</ParamField>
+
+**Features:**
+- Publishes checks every 3 minutes
+- Reads active websites from database
+- Publishes to Redis streams for workers
+
+## Production Commands
+
+### Service Management
+
+```bash
+# Start services
+docker compose -f docker-compose.prod.yaml up -d
+
+# Stop services
+docker compose -f docker-compose.prod.yaml down
+
+# Restart all services
+docker compose -f docker-compose.prod.yaml restart
+
+# Restart specific service
+docker compose -f docker-compose.prod.yaml restart backend
+```
+
+### Monitoring
+
+```bash
+# View all logs
+docker compose -f docker-compose.prod.yaml logs -f
+
+# View logs for specific service
+docker compose -f docker-compose.prod.yaml logs -f worker
+
+# Check service status
+docker compose -f docker-compose.prod.yaml ps
+
+# View resource usage
+docker stats
+```
+
+### Updates and Rebuilds
+
+```bash
+# Rebuild all services
+docker compose -f docker-compose.prod.yaml up --build -d
+
+# Rebuild specific service
+docker compose -f docker-compose.prod.yaml up --build -d backend
+
+# Pull latest base images
+docker compose -f docker-compose.prod.yaml pull
+```
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Redis Password">
+    <Warning>
+      Always set a strong `REDIS_PASSWORD` in production.
+    </Warning>
+
+    Generate a secure password:
+    ```bash
+    openssl rand -base64 32
+    ```
+
+    Set in `.env`:
+    ```bash
+    REDIS_PASSWORD=your-generated-password
+    ```
+  </Accordion>
+
+  <Accordion title="JWT Secret">
+    Use a cryptographically secure random string:
+    ```bash
+    openssl rand -base64 32
+    ```
+
+    Never use the development default (`dev-secret`) in production.
+  </Accordion>
+
+  <Accordion title="Environment Variables">
+    - Never commit `.env` files to version control
+    - Use environment-specific `.env` files
+    - Rotate secrets regularly
+    - Use secrets management for sensitive values
+  </Accordion>
+
+  <Accordion title="Network Security">
+    - Services are isolated in Docker networks
+    - Only necessary ports are exposed to host
+    - Consider using a reverse proxy (nginx, Traefik)
+    - Enable HTTPS with SSL/TLS certificates
+  </Accordion>
+
+  <Accordion title="Regular Updates">
+    - Update base images regularly for security patches
+    - Monitor for vulnerabilities in dependencies
+    - Keep Docker and Docker Compose up to date
+  </Accordion>
+</AccordionGroup>
+
+## Scaling
+
+Scale services to handle increased load:
+
+```bash
+# Scale worker instances to 3
+docker compose -f docker-compose.prod.yaml up -d --scale worker=3
+
+# Scale publisher (usually only need 1)
+docker compose -f docker-compose.prod.yaml up -d --scale publisher=1
+```
+
+<Info>
+  Multiple workers will share the same consumer group, distributing load across instances.
+</Info>
+
+## Maintenance
+
+### Redis Data Backup
+
+```bash
+# Create backup
+docker compose -f docker-compose.prod.yaml exec redis redis-cli \n  -a $REDIS_PASSWORD --rdb /data/dump.rdb
+
+# Copy backup from container
+docker cp better-uptime-redis:/data/dump.rdb \n  ./redis-backup-$(date +%Y%m%d).rdb
+```
+
+### Redis Data Restore
+
+```bash
+# Copy backup to container
+docker cp ./redis-backup.rdb better-uptime-redis:/data/dump.rdb
+
+# Restart Redis to load backup
+docker compose -f docker-compose.prod.yaml restart redis
+```
+
+### Redis CLI Access
+
+```bash
+# Connect to Redis CLI
+docker compose -f docker-compose.prod.yaml exec redis \n  redis-cli -a $REDIS_PASSWORD
+
+# View Redis info
+docker compose -f docker-compose.prod.yaml exec redis \n  redis-cli -a $REDIS_PASSWORD info
+```
+
+## Migration from Cloud Redis
+
+When migrating from cloud Redis to self-hosted:
+
+<Steps>
+  <Step title="Prepare for migration">
+    Ensure all pending messages are processed in cloud Redis.
+  </Step>
+
+  <Step title="Update environment">
+    Change `REDIS_HOST` from cloud URL to `redis` (for Docker networking) or `127.0.0.1` (for host networking).
+  </Step>
+
+  <Step title="Deploy Docker services">
+    ```bash
+    docker compose -f docker-compose.prod.yaml up --build -d
+    ```
+  </Step>
+
+  <Step title="Verify connections">
+    Check logs to ensure services connect successfully:
+    ```bash
+    docker compose -f docker-compose.prod.yaml logs -f
+    ```
+  </Step>
+
+  <Step title="Monitor">
+    Watch for connection errors or message processing issues over the next few hours.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Services Won't Start">
+    1. Check service logs:
+       ```bash
+       docker compose -f docker-compose.prod.yaml logs service-name
+       ```
+
+    2. Verify environment variables are set correctly
+
+    3. Check for port conflicts:
+       ```bash
+       netstat -tulpn | grep :8084
+       ```
+
+    4. Ensure Docker has enough resources (memory, disk space)
+  </Accordion>
+
+  <Accordion title="Redis Connection Failures">
+    1. Verify Redis password matches in all service configurations
+
+    2. Check Redis is healthy:
+       ```bash
+       docker compose -f docker-compose.prod.yaml ps redis
+       ```
+
+    3. Test Redis connection:
+       ```bash
+       docker compose -f docker-compose.prod.yaml exec redis redis-cli -a $REDIS_PASSWORD ping
+       ```
+  </Accordion>
+
+  <Accordion title="High Memory Usage">
+    1. Check Docker stats:
+       ```bash
+       docker stats
+       ```
+
+    2. Redis has a 256MB limit with LRU eviction
+
+    3. Consider increasing Redis memory limit in docker-compose.prod.yaml:
+       ```yaml
+       --maxmemory 512mb
+       ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="gear" href="/deployment/environment-variables">
+    Complete environment variable reference
+  </Card>
+  <Card title="Database Setup" icon="database" href="/deployment/database-setup">
+    Configure PostgreSQL and run migrations
+  </Card>
+  <Card title="Development Setup" icon="code" href="/deployment/docker-development">
+    Set up local development environment
+  </Card>
+</CardGroup>

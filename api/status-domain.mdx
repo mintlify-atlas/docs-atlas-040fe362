@@ -1,0 +1,252 @@
+---
+title: Status Domain Endpoints
+description: Configure and verify custom domains for status pages
+---
+
+<Note>All status domain endpoints (except `canIssueTls`) require authentication.</Note>
+
+## requestVerification
+
+Initiate custom domain verification for a status page. Returns DNS records that must be configured.
+
+### Input Parameters
+
+<ParamField path="statusPageId" type="string" required>
+  ID of the status page to configure a custom domain for
+</ParamField>
+
+<ParamField path="hostname" type="string" required>
+  Custom domain hostname. Must start with `status.` (e.g., `status.example.com`)
+</ParamField>
+
+### Response
+
+<ResponseField name="statusPageId" type="string">
+  Status page ID
+</ResponseField>
+
+<ResponseField name="hostname" type="string">
+  The hostname being verified
+</ResponseField>
+
+<ResponseField name="verificationStatus" type="enum">
+  Current verification status: `"PENDING"`, `"VERIFIED"`, or `"FAILED"`
+</ResponseField>
+
+<ResponseField name="cnameRecordName" type="string">
+  DNS CNAME record name to configure
+</ResponseField>
+
+<ResponseField name="cnameRecordValue" type="string">
+  DNS CNAME record value to configure
+</ResponseField>
+
+<ResponseField name="txtRecordName" type="string">
+  DNS TXT record name to configure for verification
+</ResponseField>
+
+<ResponseField name="txtRecordValue" type="string">
+  DNS TXT record value containing the verification token
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.statusDomain.requestVerification.mutate({
+  statusPageId: "clx1234567890",
+  hostname: "status.example.com"
+});
+
+console.log("Configure these DNS records:");
+console.log(`CNAME: ${result.cnameRecordName} -> ${result.cnameRecordValue}`);
+console.log(`TXT: ${result.txtRecordName} -> ${result.txtRecordValue}`);
+```
+
+```json Response
+{
+  "statusPageId": "clx1234567890",
+  "hostname": "status.example.com",
+  "verificationStatus": "PENDING",
+  "cnameRecordName": "status.example.com",
+  "cnameRecordValue": "status.betteruptime.app",
+  "txtRecordName": "_betteruptime-verify.status.example.com",
+  "txtRecordValue": "uptique-abc123def456789"
+}
+```
+</CodeGroup>
+
+### DNS Configuration
+
+After receiving the response, configure the following DNS records:
+
+1. **CNAME Record**: Points your custom domain to the Better Uptime status page service
+   - Name: `status.example.com`
+   - Value: `status.betteruptime.app`
+
+2. **TXT Record**: Proves domain ownership
+   - Name: `_betteruptime-verify.status.example.com`
+   - Value: The verification token provided
+
+### Error Codes
+
+- `NOT_FOUND` - Status page not found or doesn't belong to user
+- `CONFLICT` - Hostname is already claimed by another status page
+
+---
+
+## verify
+
+Verify DNS configuration and activate the custom domain.
+
+### Input Parameters
+
+<ParamField path="statusPageId" type="string" required>
+  Status page ID
+</ParamField>
+
+<ParamField path="hostname" type="string" required>
+  Hostname to verify (must match the one from `requestVerification`)
+</ParamField>
+
+### Response
+
+<ResponseField name="statusPageId" type="string">
+  Status page ID
+</ResponseField>
+
+<ResponseField name="hostname" type="string">
+  The hostname being verified
+</ResponseField>
+
+<ResponseField name="verificationStatus" type="enum">
+  Updated verification status: `"VERIFIED"` on success, `"FAILED"` if DNS records are not correctly configured
+</ResponseField>
+
+<ResponseField name="txtVerified" type="boolean">
+  Whether the TXT record verification passed
+</ResponseField>
+
+<ResponseField name="cnameVerified" type="boolean">
+  Whether the CNAME record verification passed
+</ResponseField>
+
+<ResponseField name="cnameRecordName" type="string">
+  Expected CNAME record name
+</ResponseField>
+
+<ResponseField name="cnameRecordValue" type="string">
+  Expected CNAME record value
+</ResponseField>
+
+<ResponseField name="txtRecordName" type="string">
+  Expected TXT record name
+</ResponseField>
+
+<ResponseField name="txtRecordValue" type="string">
+  Expected TXT record value
+</ResponseField>
+
+<ResponseField name="verifiedAt" type="date | null">
+  Timestamp when the domain was verified (null if not verified)
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.statusDomain.verify.mutate({
+  statusPageId: "clx1234567890",
+  hostname: "status.example.com"
+});
+
+if (result.verificationStatus === "VERIFIED") {
+  console.log("Domain verified successfully!");
+} else {
+  console.log("Verification failed:");
+  console.log(`TXT verified: ${result.txtVerified}`);
+  console.log(`CNAME verified: ${result.cnameVerified}`);
+}
+```
+
+```json Response (Success)
+{
+  "statusPageId": "clx1234567890",
+  "hostname": "status.example.com",
+  "verificationStatus": "VERIFIED",
+  "txtVerified": true,
+  "cnameVerified": true,
+  "cnameRecordName": "status.example.com",
+  "cnameRecordValue": "status.betteruptime.app",
+  "txtRecordName": "_betteruptime-verify.status.example.com",
+  "txtRecordValue": "uptique-abc123def456789",
+  "verifiedAt": "2024-03-15T12:00:00.000Z"
+}
+```
+
+```json Response (Failed)
+{
+  "statusPageId": "clx1234567890",
+  "hostname": "status.example.com",
+  "verificationStatus": "FAILED",
+  "txtVerified": false,
+  "cnameVerified": true,
+  "cnameRecordName": "status.example.com",
+  "cnameRecordValue": "status.betteruptime.app",
+  "txtRecordName": "_betteruptime-verify.status.example.com",
+  "txtRecordValue": "uptique-abc123def456789",
+  "verifiedAt": null
+}
+```
+</CodeGroup>
+
+### Verification Process
+
+The endpoint checks DNS records using multiple public DNS resolvers (Cloudflare and Google DNS) to ensure proper propagation. Both the CNAME and TXT records must be correctly configured for verification to pass.
+
+### Error Codes
+
+- `NOT_FOUND` - Domain mapping not found or doesn't belong to user
+
+---
+
+## canIssueTls
+
+Check if TLS certificate issuance is allowed for a hostname. This is a public endpoint used by the TLS certificate automation system.
+
+<Info>This endpoint does not require authentication and is intended for internal infrastructure use.</Info>
+
+### Input Parameters
+
+<ParamField path="hostname" type="string" required>
+  Hostname to check TLS eligibility for
+</ParamField>
+
+### Response
+
+<ResponseField name="allowed" type="boolean">
+  Whether TLS certificate issuance is allowed for this hostname
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.statusDomain.canIssueTls.query({
+  hostname: "status.example.com"
+});
+
+if (result.allowed) {
+  console.log("TLS certificate issuance is allowed");
+} else {
+  console.log("TLS certificate issuance is not allowed");
+}
+```
+
+```json Response
+{
+  "allowed": true
+}
+```
+</CodeGroup>
+
+### Conditions for TLS Issuance
+
+TLS certificate issuance is allowed when:
+- The hostname has a verified domain mapping
+- The associated status page is published
+- DNS verification has passed

@@ -1,0 +1,356 @@
+---
+title: Testing
+description: Running tests and maintaining code quality
+---
+
+## Testing Strategy
+
+Better Uptime uses two test runners:
+
+1. **Vitest** - For most packages (validators, etc.)
+2. **Bun Test** - For API packages using Bun runtime
+
+## Running Tests
+
+### Run All Tests
+
+From the root of the monorepo:
+
+```bash
+pnpm test
+```
+
+This runs tests across all packages using Turborepo's task pipeline.
+
+### Watch Mode
+
+Run tests in watch mode for active development:
+
+```bash
+pnpm test:watch
+```
+
+Tests automatically re-run when files change.
+
+### Coverage Reports
+
+Generate test coverage reports:
+
+```bash
+pnpm test:coverage
+```
+
+Coverage reports are generated in the `coverage/` directory of each package.
+
+## Package-Specific Testing
+
+### Testing with Vitest
+
+**Used by:** `@repo/validators`
+
+#### Configuration
+
+`packages/validators/vitest.config.ts`:
+
+```typescript
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json", "html"],
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.test.ts", "src/__tests__/**"],
+    },
+  },
+});
+```
+
+#### Package Scripts
+
+```json
+{
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  }
+}
+```
+
+#### Run Vitest Tests
+
+```bash
+# From package directory
+cd packages/validators
+pnpm test
+
+# From root with filter
+pnpm --filter @repo/validators test
+```
+
+#### Example Test
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { userSchema } from "../user";
+
+describe("User Schema", () => {
+  it("validates correct user data", () => {
+    const validUser = {
+      email: "user@example.com",
+      password: "SecurePass123!"
+    };
+    
+    expect(() => userSchema.parse(validUser)).not.toThrow();
+  });
+
+  it("rejects invalid email", () => {
+    const invalidUser = {
+      email: "not-an-email",
+      password: "SecurePass123!"
+    };
+    
+    expect(() => userSchema.parse(invalidUser)).toThrow();
+  });
+});
+```
+
+### Testing with Bun
+
+**Used by:** `@repo/api`
+
+#### Package Scripts
+
+```json
+{
+  "scripts": {
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage"
+  }
+}
+```
+
+#### Run Bun Tests
+
+```bash
+# From package directory
+cd packages/api
+bun test
+
+# From root with filter
+pnpm --filter @repo/api test
+```
+
+#### Example Test
+
+```typescript
+import { describe, it, expect } from "bun:test";
+import { userRouter } from "../routes/user";
+
+describe("User Router", () => {
+  it("creates a new user", async () => {
+    const result = await userRouter.createUser({
+      email: "test@example.com",
+      password: "SecurePass123!"
+    });
+    
+    expect(result.success).toBe(true);
+    expect(result.user.email).toBe("test@example.com");
+  });
+});
+```
+
+## Workspace Test Configuration
+
+The root `vitest.workspace.ts` defines which packages use Vitest:
+
+```typescript
+import { defineWorkspace } from "vitest/config";
+
+// Note: packages/api uses Bun's native test runner (bun test)
+export default defineWorkspace(["packages/validators"]);
+```
+
+This ensures Vitest only runs for packages that use it, while Bun Test handles `@repo/api`.
+
+## Test Organization
+
+### Directory Structure
+
+Tests are organized in `__tests__` directories:
+
+```
+packages/validators/
+├── src/
+│   ├── user/
+│   │   └── index.ts
+│   └── __tests__/
+│       ├── user.test.ts
+│       ├── website.test.ts
+│       └── status-page.test.ts
+```
+
+or co-located with source files:
+
+```
+packages/api/
+├── src/
+│   ├── routes/
+│   │   ├── user.ts
+│   │   └── user.test.ts
+```
+
+### Test Naming
+
+- Unit tests: `*.test.ts`
+- Integration tests: `*.integration.test.ts`
+- E2E tests: `*.e2e.test.ts`
+
+## Coverage Configuration
+
+### Vitest Coverage
+
+Coverage is provided by `@vitest/coverage-v8`:
+
+```json
+{
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.17"
+  }
+}
+```
+
+**Coverage reports include:**
+- Text summary (console)
+- JSON report
+- HTML report (browsable)
+
+**View HTML coverage:**
+
+```bash
+open packages/validators/coverage/index.html
+```
+
+### Coverage Exclusions
+
+Exclude test files from coverage:
+
+```typescript
+coverage: {
+  include: ["src/**/*.ts"],
+  exclude: ["src/**/*.test.ts", "src/__tests__/**"],
+}
+```
+
+## Turborepo Test Pipeline
+
+### Test Task Configuration
+
+`turbo.json` configures test behavior:
+
+```json
+{
+  "tasks": {
+    "test": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*", ".env.test*"],
+      "cache": false
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true
+    },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*", ".env.test*"],
+      "outputs": ["coverage/**"]
+    }
+  }
+}
+```
+
+**Key behaviors:**
+- Tests depend on build completing first
+- Test results are not cached (always run fresh)
+- Coverage outputs are tracked for caching
+- Test environment variables are included as inputs
+
+## Best Practices
+
+### Write Testable Code
+
+- Keep functions pure when possible
+- Use dependency injection for external services
+- Separate business logic from framework code
+
+### Test Coverage Goals
+
+- Aim for **80%+ coverage** on critical packages
+- Focus on business logic over framework glue
+- Test edge cases and error conditions
+
+### Fast Tests
+
+- Mock external dependencies (databases, APIs)
+- Use in-memory implementations for tests
+- Keep unit tests under 100ms each
+
+### Continuous Integration
+
+Tests run automatically on:
+
+- Pre-commit (via husky + lint-staged)
+- Pull requests (via GitHub Actions)
+- Before deployments
+
+## Troubleshooting
+
+### Tests Not Running
+
+Ensure dependencies are installed:
+
+```bash
+pnpm install
+```
+
+### Vitest Not Found
+
+Install Vitest at the root:
+
+```bash
+pnpm add -D vitest @vitest/coverage-v8
+```
+
+### Bun Test Errors
+
+Ensure Bun is installed and up to date:
+
+```bash
+bun --version
+bun upgrade
+```
+
+### Coverage Not Generated
+
+Run with explicit coverage flag:
+
+```bash
+pnpm test:coverage --coverage
+```
+
+## Related Commands
+
+| Command | Description |
+|---------|-------------|
+| `pnpm test` | Run all tests |
+| `pnpm test:watch` | Watch mode |
+| `pnpm test:coverage` | Generate coverage |
+| `pnpm --filter <package> test` | Test specific package |
+| `bun test` | Run Bun tests directly |
+| `vitest run` | Run Vitest tests directly |

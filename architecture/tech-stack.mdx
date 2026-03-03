@@ -1,0 +1,309 @@
+---
+title: 'Technology Stack'
+description: 'Technologies and frameworks used in Better Uptime'
+---
+
+## Overview
+
+Better Uptime is built with modern, production-ready technologies chosen for performance, type safety, and developer experience.
+
+## Backend
+
+### tRPC
+
+**End-to-end type safety for APIs**
+
+- Automatic TypeScript type inference from server to client
+- No code generation required
+- Built-in request/response validation with Zod
+- WebSocket support for real-time subscriptions
+
+**Router structure:**
+```typescript
+const appRouter = router({
+  user: userRouter,
+  website: websiteRouter,
+  statusPage: statusPageRouter,
+  statusDomain: statusDomainRouter,
+});
+```
+
+**Reference:** `apps/server/src/index.ts:9`
+
+### Bun
+
+**Fast JavaScript runtime and toolkit**
+
+- Significantly faster than Node.js for I/O operations
+- Native TypeScript support (no compilation step needed)
+- Built-in test runner and bundler
+- Optimized for server-side workloads
+
+**Package manager:** All projects use `pnpm` (specified in `package.json`)
+
+## Frontend
+
+### Next.js 16
+
+**React framework with advanced features**
+
+- Server-side rendering (SSR) for optimal SEO
+- App Router architecture
+- API routes for server-side logic
+- Automatic code splitting
+- Image optimization
+
+**Key features used:**
+- Server components for reduced client bundle size
+- Client components for interactive UI
+- Static generation for status pages
+
+### React 19
+
+**Latest React with modern patterns**
+
+- Server components
+- Suspense for data fetching
+- Concurrent rendering
+- Improved hydration
+
+### UI Libraries
+
+**Component libraries and styling:**
+
+- **HeroUI**: React component library for consistent design
+- **Radix UI**: Unstyled, accessible components
+- **Tailwind CSS 4**: Utility-first CSS framework
+- **Framer Motion**: Animation library
+- **Lucide React**: Icon library
+
+**Reference:** `apps/client/package.json:11-50`
+
+## Databases
+
+### PostgreSQL
+
+**Primary transactional database**
+
+**Stores:**
+- User accounts and authentication
+- Website configurations
+- Status page settings
+- Alert rules and notification channels
+
+**Access via:** Prisma ORM for type-safe database queries
+
+```typescript
+const websites = await prismaClient.website.findMany({
+  where: { isActive: true },
+  select: { url: true, id: true },
+});
+```
+
+**Reference:** `apps/publisher/src/index.ts:14`
+
+### ClickHouse
+
+**Columnar OLAP database for time-series data**
+
+**Optimized for:**
+- High-volume ingestion (thousands of checks per minute)
+- Fast analytical queries
+- Efficient compression
+- Time-series operations
+
+**Schema:**
+```sql
+CREATE TABLE uptime_metrics (
+  website_id String,
+  region_id String,
+  status Enum('UP' = 1, 'DOWN' = 0),
+  response_time_ms Nullable(UInt32),
+  http_status_code Nullable(UInt16),
+  checked_at DateTime64(3, 'UTC'),
+  ingested_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+ORDER BY (website_id, region_id, checked_at)
+```
+
+**Reference:** `packages/clickhouse/src/index.ts:91`
+
+**Query patterns:**
+- Recent events: `ORDER BY checked_at DESC LIMIT n BY website_id`
+- Historical analysis: `WHERE checked_at >= now() - INTERVAL n HOUR`
+
+### Redis
+
+**In-memory data structure store**
+
+**Used for:**
+- **Redis Streams**: Message queue for website check tasks
+- Session storage
+- Rate limiting
+- Caching layer
+
+**Stream configuration:**
+- Consumer groups for distributed processing
+- Pending Entries List (PEL) for reliable delivery
+- Automatic trimming to prevent memory exhaustion (~8000 messages)
+
+**Reference:** `packages/streams/src/index.ts:166`
+
+## Development Tools
+
+### Turborepo
+
+**Monorepo build system**
+
+- Incremental builds (only rebuild what changed)
+- Remote caching for CI/CD
+- Task orchestration across packages
+- Parallel execution of independent tasks
+
+**Build pipeline:**
+```json
+{
+  "build": {
+    "dependsOn": ["^build"],
+    "outputs": [".next/**", "!.next/cache/**"]
+  }
+}
+```
+
+**Reference:** `turbo.json:6`
+
+### Prisma
+
+**Next-generation ORM**
+
+- Type-safe database client
+- Database migrations
+- Schema definition language
+- Introspection and migration generation
+
+### Zod
+
+**TypeScript-first schema validation**
+
+- Runtime type checking
+- Inference of static TypeScript types
+- Composable validators
+- Integration with tRPC for API validation
+
+## Testing & Quality
+
+### Vitest
+
+**Fast unit test framework**
+
+- Vite-powered (extremely fast)
+- Jest-compatible API
+- Native TypeScript support
+- Coverage reporting with v8
+
+**Configuration:** `test`, `test:watch`, `test:coverage` scripts available
+
+### ESLint
+
+**JavaScript/TypeScript linting**
+
+- Shared configuration across workspace
+- Next.js-specific rules
+- Enforces code quality and consistency
+
+### Prettier
+
+**Code formatting**
+
+- Consistent code style
+- Auto-formatting on save
+- Pre-commit hooks via Husky
+
+### Husky + lint-staged
+
+**Git hooks for quality checks**
+
+- Pre-commit: Lint and format staged files
+- Prevents broken code from being committed
+
+**Reference:** `package.json:14`
+
+## HTTP & Networking
+
+### Axios
+
+**HTTP client for uptime checks**
+
+- Promise-based API
+- Request/response interceptors
+- Timeout support with AbortController
+- Automatic retries (configurable)
+
+**Usage in worker:**
+```typescript
+const res = await axios.get(url, {
+  signal: abortController.signal,
+  maxRedirects: 5,
+  validateStatus: () => true,
+  headers: {
+    'User-Agent': 'Uptique/1.0 (Uptime Monitor)'
+  }
+});
+```
+
+**Reference:** `apps/worker/src/index.ts:80`
+
+## Why These Technologies?
+
+### Type Safety
+
+**End-to-end type safety chain:**
+1. Zod schemas validate runtime data
+2. Prisma generates types from database schema
+3. tRPC infers types from Zod validators
+4. React components receive fully typed data
+
+### Performance
+
+- **Bun**: 2-3x faster than Node.js for I/O
+- **ClickHouse**: Handles millions of rows with sub-second queries
+- **Redis Streams**: In-memory queue with microsecond latency
+- **Next.js**: Optimized rendering and code splitting
+
+### Scalability
+
+- **Turborepo**: Scales to hundreds of packages
+- **Redis consumer groups**: Horizontal worker scaling
+- **ClickHouse**: Scales to billions of rows
+- **Stateless services**: Easy horizontal scaling
+
+### Developer Experience
+
+- **Monorepo**: Shared code and consistent tooling
+- **Hot reload**: Fast development iteration
+- **Type inference**: Minimal type annotations needed
+- **Testing**: Fast feedback loop with Vitest
+
+## Version Information
+
+| Technology | Version |
+|------------|----------|
+| Next.js | 16.1.1 |
+| React | 19.2.3 |
+| TypeScript | 5.9.2 |
+| Turborepo | 2.7.1 |
+| Vitest | 4.0.17 |
+| tRPC | 11.8.1 |
+| Tailwind CSS | 4.x |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="System Architecture" icon="diagram-project" href="/architecture/overview">
+    Understand how components interact
+  </Card>
+  <Card title="Monorepo Structure" icon="folder-tree" href="/architecture/monorepo-structure">
+    Explore the codebase organization
+  </Card>
+</CardGroup>

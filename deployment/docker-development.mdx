@@ -1,0 +1,278 @@
+---
+title: 'Docker Development Setup'
+description: 'Set up Better Uptime for local development using Docker Compose'
+---
+
+## Overview
+
+The development configuration is optimized for local development with hot reload, volume mounts, and developer-friendly defaults. All services run in Docker containers with live code reloading enabled.
+
+## Services Included
+
+The development environment includes five core services:
+
+<CardGroup cols={2}>
+  <Card title="Redis" icon="database">
+    Self-hosted Redis instance for message streams
+  </Card>
+  <Card title="Backend" icon="server">
+    Bun server with tRPC API on port 8084
+  </Card>
+  <Card title="Frontend" icon="browser">
+    Next.js client application on port 3000
+  </Card>
+  <Card title="Worker" icon="gear">
+    Bun worker service for processing uptime checks
+  </Card>
+  <Card title="Publisher" icon="paper-plane">
+    Bun publisher service for publishing website checks to Redis streams
+  </Card>
+</CardGroup>
+
+## Development Features
+
+<AccordionGroup>
+  <Accordion title="Hot Reload">
+    All services use hot reload:
+    - Backend, Worker, and Publisher use Bun's `--hot` flag
+    - Frontend uses Next.js dev mode
+    - Code changes are reflected instantly without container restarts
+  </Accordion>
+
+  <Accordion title="Volume Mounts">
+    Source code is mounted into containers:
+    - Changes persist across container restarts
+    - No need to rebuild containers for code changes
+    - Separate node_modules volumes to prevent conflicts
+  </Accordion>
+
+  <Accordion title="Development Defaults">
+    Convenient defaults for local development:
+    - Default Redis password: `dev-password`
+    - Default JWT secret: `dev-secret`
+    - Docker network: `better-uptime-network-dev`
+    - Redis volume: `redis-data-dev` (separate from production)
+  </Accordion>
+</AccordionGroup>
+
+## Environment Setup
+
+<Warning>
+  Development defaults use weak passwords. Never use these settings in production.
+</Warning>
+
+Create a `.env` file in your project root or `packages/config/.env`:
+
+```bash
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/database
+
+# Auth (can use dev defaults)
+JWT_SECRET=dev-secret-change-in-production
+
+# GitHub OAuth
+CLIENT_ID_GITHUB=your-github-client-id
+CLIENT_SECRET_GITHUB=your-github-client-secret
+
+# Email (Resend)
+RESEND_API_KEY=your-resend-api-key
+
+# Redis Configuration (dev defaults)
+REDIS_HOST=redis  # Use 'redis' for Docker networking
+REDIS_PORT=6379
+REDIS_USERNAME=default
+REDIS_PASSWORD=dev-password
+
+# Backend
+BACKEND_PORT=8084
+
+# Frontend
+FRONTEND_PORT=3000
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8084
+
+# Worker Configuration
+REGION_ID=us-east-1
+WORKER_ID=worker-1
+
+# ClickHouse (optional)
+CLICKHOUSE_URL=
+CLICKHOUSE_USERNAME=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DATABASE=default
+CLICKHOUSE_METRICS_TABLE=uptime_checks
+```
+
+## Quick Start
+
+<Steps>
+  <Step title="Navigate to Docker directory">
+    ```bash
+    cd docker
+    ```
+  </Step>
+
+  <Step title="Start development services">
+    ```bash
+    docker compose -f docker-compose.dev.yaml up --build
+    ```
+    
+    This will:
+    - Build all service images
+    - Start all containers
+    - Show logs in your terminal
+  </Step>
+
+  <Step title="Access services">
+    Once all services are running:
+    - **Frontend**: http://localhost:3000
+    - **Backend**: http://localhost:8084
+    - **Redis**: localhost:6379
+  </Step>
+</Steps>
+
+## Development Commands
+
+### Starting Services
+
+```bash
+# Start all services (foreground)
+docker compose -f docker-compose.dev.yaml up
+
+# Start in background (detached mode)
+docker compose -f docker-compose.dev.yaml up -d
+
+# Rebuild and start
+docker compose -f docker-compose.dev.yaml up --build
+```
+
+### Viewing Logs
+
+```bash
+# View all service logs
+docker compose -f docker-compose.dev.yaml logs -f
+
+# View logs for specific service
+docker compose -f docker-compose.dev.yaml logs -f backend
+docker compose -f docker-compose.dev.yaml logs -f worker
+```
+
+### Stopping Services
+
+```bash
+# Stop services
+docker compose -f docker-compose.dev.yaml down
+
+# Stop and remove volumes (deletes Redis data)
+docker compose -f docker-compose.dev.yaml down -v
+```
+
+### Working with Redis
+
+```bash
+# Connect to Redis CLI
+docker compose -f docker-compose.dev.yaml exec redis redis-cli -a dev-password
+
+# View Redis info
+docker compose -f docker-compose.dev.yaml exec redis redis-cli -a dev-password info
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Redis Connection Issues">
+    If services can't connect to Redis:
+
+    1. Check Redis is healthy:
+       ```bash
+       docker compose -f docker-compose.dev.yaml ps
+       ```
+
+    2. Verify Redis password matches in `.env`
+
+    3. Check network connectivity:
+       ```bash
+       docker compose -f docker-compose.dev.yaml exec backend ping redis
+       ```
+
+    4. View Redis logs:
+       ```bash
+       docker compose -f docker-compose.dev.yaml logs redis
+       ```
+  </Accordion>
+
+  <Accordion title="Build Issues">
+    If builds fail:
+
+    1. Clear Docker cache:
+       ```bash
+       docker compose -f docker-compose.dev.yaml build --no-cache
+       ```
+
+    2. Check Dockerfile paths are correct
+
+    3. Verify all package.json files exist
+
+    4. Ensure pnpm-lock.yaml is up to date
+  </Accordion>
+
+  <Accordion title="Port Conflicts">
+    If ports are already in use:
+
+    1. Change ports in `.env` file:
+       ```bash
+       BACKEND_PORT=8085
+       FRONTEND_PORT=3001
+       ```
+
+    2. Restart services:
+       ```bash
+       docker compose -f docker-compose.dev.yaml restart
+       ```
+  </Accordion>
+
+  <Accordion title="Hot Reload Not Working">
+    1. Verify volume mounts:
+       ```bash
+       docker compose -f docker-compose.dev.yaml config
+       ```
+
+    2. Check file permissions on mounted volumes
+
+    3. Ensure source code is in the correct location
+
+    4. Restart the service:
+       ```bash
+       docker compose -f docker-compose.dev.yaml restart backend
+       ```
+  </Accordion>
+</AccordionGroup>
+
+## Switching to Production
+
+To switch from development to production:
+
+```bash
+# Stop development services
+docker compose -f docker-compose.dev.yaml down
+
+# Start production services
+docker compose -f docker-compose.prod.yaml up --build -d
+```
+
+<Info>
+  Development and production use separate networks and volumes, so they won't interfere with each other.
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Deployment" icon="rocket" href="/deployment/docker-production">
+    Deploy Better Uptime to production
+  </Card>
+  <Card title="Environment Variables" icon="gear" href="/deployment/environment-variables">
+    Configure all environment variables
+  </Card>
+  <Card title="Database Setup" icon="database" href="/deployment/database-setup">
+    Set up and configure PostgreSQL
+  </Card>
+</CardGroup>

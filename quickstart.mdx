@@ -1,80 +1,409 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 'Quickstart'
+description: 'Get Better Uptime running in minutes with Docker'
+icon: 'rocket'
 ---
 
-## Get started in three steps
+<Note>
+  This guide will help you deploy Better Uptime using Docker and set up your first monitor in under 10 minutes.
+</Note>
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, ensure you have the following installed:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- **Docker** and **Docker Compose** (v2.0+)
+- **PostgreSQL** database (local or cloud-hosted)
+- **GitHub OAuth App** for authentication ([Create one here](https://github.com/settings/developers))
+- **Resend API Key** for email notifications ([Get one here](https://resend.com))
 
-### Step 2: Deploy your changes
+<Tip>
+  Optional: Set up ClickHouse for time-series metrics storage. Better Uptime will work without it, but historical data will be limited.
+</Tip>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Environment Setup
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+Create a `.env` file in your project root with the following configuration:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash .env
+# Database
+DATABASE_URL=postgresql://user:password@host:5432/database
 
-### Step 3: Go live
+# Authentication
+JWT_SECRET=your-strong-jwt-secret-here
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+# GitHub OAuth
+CLIENT_ID_GITHUB=your-github-client-id
+CLIENT_SECRET_GITHUB=your-github-client-secret
 
-## Next steps
+# Email (Resend)
+RESEND_API_KEY=your-resend-api-key
 
-Now that you have your docs running, explore these key features:
+# Redis Configuration
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_USERNAME=default
+REDIS_PASSWORD=dev-password
+
+# Backend
+BACKEND_PORT=8084
+
+# Frontend
+FRONTEND_PORT=3000
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8084
+
+# Worker Configuration
+REGION_ID=us-east-1
+WORKER_ID=worker-1
+
+# ClickHouse (optional)
+CLICKHOUSE_URL=
+CLICKHOUSE_USERNAME=default
+CLICKHOUSE_PASSWORD=
+CLICKHOUSE_DATABASE=default
+CLICKHOUSE_METRICS_TABLE=uptime_checks
+```
+
+<Warning>
+  Never commit your `.env` file to version control. Add it to `.gitignore` immediately.
+</Warning>
+
+## Docker Setup
+
+Better Uptime provides two Docker configurations: development and production. Choose the one that fits your needs.
+
+<Tabs>
+  <Tab title="Development">
+    ### Development Setup
+
+    The development configuration includes hot reload and is optimized for local development.
+
+    <Steps>
+      <Step title="Navigate to Docker directory">
+        ```bash
+        cd docker
+        ```
+      </Step>
+
+      <Step title="Start development services">
+        ```bash
+        docker compose -f docker-compose.dev.yaml up --build
+        ```
+
+        This will start:
+        - **Redis** - Self-hosted Redis for streams
+        - **Backend** - Bun server with tRPC API
+        - **Frontend** - Next.js client with hot reload
+        - **Worker** - Processes uptime checks from Redis streams
+        - **Publisher** - Publishes website checks every 3 minutes
+      </Step>
+
+      <Step title="Access the application">
+        - **Frontend**: [http://localhost:3000](http://localhost:3000)
+        - **Backend API**: [http://localhost:8084](http://localhost:8084)
+        - **Redis**: localhost:6379
+      </Step>
+    </Steps>
+
+    ### Development Features
+
+    - Hot reload for all services (Bun `--hot` flag, Next.js dev mode)
+    - Volume mounts for live code changes
+    - Separate networks and volumes (`better-uptime-network-dev`)
+    - Development-friendly defaults
+
+    ### Useful Commands
+
+    <CodeGroup>
+      ```bash Start in background
+      docker compose -f docker-compose.dev.yaml up -d
+      ```
+
+      ```bash View logs
+      docker compose -f docker-compose.dev.yaml logs -f
+      ```
+
+      ```bash View service logs
+      docker compose -f docker-compose.dev.yaml logs -f backend
+      ```
+
+      ```bash Stop services
+      docker compose -f docker-compose.dev.yaml down
+      ```
+
+      ```bash Rebuild
+      docker compose -f docker-compose.dev.yaml up --build
+      ```
+    </CodeGroup>
+  </Tab>
+
+  <Tab title="Production">
+    ### Production Setup
+
+    The production configuration is optimized with multi-stage builds and security best practices.
+
+    <Warning>
+      Use strong, production-ready values for all secrets. Never use development defaults in production.
+    </Warning>
+
+    <Steps>
+      <Step title="Update environment variables">
+        Ensure your `.env` file has production-ready values:
+
+        ```bash
+        # Use strong passwords
+        JWT_SECRET=your-cryptographically-secure-random-string
+        REDIS_PASSWORD=your-strong-redis-password
+
+        # Update host for production
+        REDIS_HOST=127.0.0.1
+        NEXT_PUBLIC_BACKEND_URL=http://your-backend-url:8084
+        ```
+      </Step>
+
+      <Step title="Navigate to Docker directory">
+        ```bash
+        cd docker
+        ```
+      </Step>
+
+      <Step title="Build and start production services">
+        ```bash
+        docker compose -f docker-compose.prod.yaml up --build -d
+        ```
+      </Step>
+
+      <Step title="Verify services are running">
+        ```bash
+        docker compose -f docker-compose.prod.yaml ps
+        ```
+      </Step>
+    </Steps>
+
+    ### Production Features
+
+    - Optimized multi-stage builds
+    - Standalone Next.js output for smaller images
+    - Resource limits and restart policies
+    - Separate production network (`better-uptime-network`)
+
+    ### Production Commands
+
+    <CodeGroup>
+      ```bash View logs
+      docker compose -f docker-compose.prod.yaml logs -f
+      ```
+
+      ```bash Stop services
+      docker compose -f docker-compose.prod.yaml down
+      ```
+
+      ```bash Restart service
+      docker compose -f docker-compose.prod.yaml restart backend
+      ```
+
+      ```bash Rebuild service
+      docker compose -f docker-compose.prod.yaml up --build -d backend
+      ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## Setting Up Your First Monitor
+
+Once Better Uptime is running, you can create your first website monitor through the API or UI.
+
+### Using the API
+
+<Steps>
+  <Step title="Authenticate">
+    Sign in through GitHub OAuth at [http://localhost:3000](http://localhost:3000)
+  </Step>
+
+  <Step title="Create a monitor">
+    Use the tRPC API to register a website:
+
+    ```typescript
+    // Example using the tRPC client
+    const website = await trpc.website.register.mutate({
+      url: "https://example.com",
+      name: "My Website" // optional
+    });
+    ```
+
+    The API validates URLs to ensure they use HTTP/HTTPS protocol:
+
+    ```typescript
+    // From source: packages/validators/src/website/index.ts
+    const httpUrlSchema = z
+      .string()
+      .min(1, "URL is required")
+      .url("Invalid URL format")
+      .refine(
+        (url) => {
+          const parsed = new URL(url);
+          return parsed.protocol === "http:" || parsed.protocol === "https:";
+        },
+        { message: "URL must use HTTP or HTTPS protocol" }
+      );
+    ```
+  </Step>
+
+  <Step title="Monitor starts automatically">
+    The website is immediately published to Redis streams for the first check:
+
+    ```typescript
+    // From source: packages/api/src/routes/website.ts:56-69
+    // Immediate first check: publish website immediately once
+    // Then let periodic publisher handle rest
+    await xAddBulk([{ url: website.url, id: website.id }]);
+    ```
+
+    After that, the publisher service checks the website every 3 minutes.
+  </Step>
+</Steps>
+
+### Monitor Data Structure
+
+When you create a monitor, the following data is stored:
+
+```typescript
+// Input validation
+{
+  url: "https://example.com",     // Required: HTTP/HTTPS URL
+  name: "My Website"               // Optional: Max 255 characters
+}
+
+// Output after creation
+{
+  id: "uuid",
+  url: "https://example.com",
+  name: "My Website",
+  isActive: true,
+  userId: "user-uuid",
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+### Viewing Monitor Status
+
+Retrieve the status of your monitors:
+
+<CodeGroup>
+  ```typescript Per-Check View
+  // Get recent individual checks (last 90)
+  const status = await trpc.website.status.query({
+    viewMode: "per-check"
+  });
+  ```
+
+  ```typescript Per-Day View
+  // Get daily aggregated data (last 31 days)
+  const status = await trpc.website.status.query({
+    viewMode: "per-day"
+  });
+  ```
+</CodeGroup>
+
+The response includes status points with health data:
+
+```typescript
+{
+  websites: [
+    {
+      websiteId: "uuid",
+      websiteName: "My Website",
+      websiteUrl: "https://example.com",
+      statusPoints: [
+        {
+          status: "UP",           // or "DOWN"
+          checkedAt: Date,
+          responseTimeMs: 123,
+          httpStatusCode: 200
+        }
+      ],
+      currentStatus: {
+        status: "UP",
+        checkedAt: Date,
+        responseTimeMs: 123,
+        httpStatusCode: 200,
+        regionId: "us-east-1"
+      }
+    }
+  ]
+}
+```
+
+## System Architecture
+
+Better Uptime uses a modern tech stack for performance and reliability:
+
+- **Backend**: tRPC for type-safe APIs
+- **Time-Series Data**: ClickHouse for metrics storage
+- **Streams**: Redis for real-time uptime checks
+- **Monorepo**: Turborepo for efficient builds
+- **Runtime**: Bun for fast JavaScript execution
+- **Database**: Prisma ORM with PostgreSQL
+- **Validation**: Zod for schema validation
+
+<Card title="View Full Architecture" icon="diagram-project" href="/architecture/overview">
+  Explore the complete system architecture and data flow diagrams
+</Card>
+
+## Next Steps
 
 <CardGroup cols={2}>
+  <Card title="Configure Monitoring" icon="gear" href="/features/uptime-monitoring">
+    Learn about advanced monitoring options and configurations
+  </Card>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+  <Card title="Set Up Notifications" icon="bell" href="/features/notifications">
+    Configure email and webhook notifications for downtime alerts
+  </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+  <Card title="API Reference" icon="code" href="/api/website">
+    Explore the complete tRPC API documentation
+  </Card>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Deploy to Production" icon="server" href="/deployment/docker-production">
+    Best practices for production deployment and scaling
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Redis connection issues">
+    If services can't connect to Redis:
+
+    1. Check Redis is healthy: `docker compose ps`
+    2. Verify Redis password matches in `.env`
+    3. Check network connectivity: `docker compose exec backend ping redis`
+    4. View Redis logs: `docker compose logs redis`
+  </Accordion>
+
+  <Accordion title="Port conflicts">
+    If ports are already in use:
+
+    1. Change ports in `.env` file
+    2. Update docker-compose.yaml port mappings
+    3. Restart services: `docker compose restart`
+  </Accordion>
+
+  <Accordion title="Hot reload not working">
+    For development environments:
+
+    1. Verify volume mounts: `docker compose config`
+    2. Check file permissions on mounted volumes
+    3. Restart the service: `docker compose restart backend`
+  </Accordion>
+
+  <Accordion title="Build failures">
+    If Docker builds fail:
+
+    1. Clear Docker cache: `docker compose build --no-cache`
+    2. Verify all package.json files exist
+    3. Ensure pnpm-lock.yaml is up to date
+  </Accordion>
+</AccordionGroup>

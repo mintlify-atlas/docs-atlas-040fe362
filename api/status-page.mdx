@@ -1,0 +1,364 @@
+---
+title: Status Page Endpoints
+description: Create and manage public status pages for your monitors
+---
+
+<Note>All status page endpoints (except `publicByHost`) require authentication.</Note>
+
+## create
+
+Create a new status page to display monitor statuses publicly.
+
+### Input Parameters
+
+<ParamField path="name" type="string" required>
+  Display name for the status page (1-120 characters)
+</ParamField>
+
+<ParamField path="slug" type="string" required>
+  URL-friendly slug (2-63 characters). Must contain only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.
+</ParamField>
+
+<ParamField path="monitorIds" type="array" required>
+  Array of website IDs to include on the status page (1-100 monitors). All monitors must belong to the authenticated user.
+</ParamField>
+
+<ParamField path="isPublished" type="boolean" default={true}>
+  Whether the status page is publicly accessible
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  Unique identifier for the status page
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Display name
+</ResponseField>
+
+<ResponseField name="slug" type="string">
+  URL slug
+</ResponseField>
+
+<ResponseField name="isPublished" type="boolean">
+  Publication status
+</ResponseField>
+
+<ResponseField name="userId" type="string">
+  Owner's user ID
+</ResponseField>
+
+<ResponseField name="monitorCount" type="number">
+  Number of monitors included
+</ResponseField>
+
+<ResponseField name="domain" type="object | null">
+  Custom domain configuration (null if not configured)
+  
+  <Expandable title="Domain Object">
+    <ResponseField name="id" type="string">
+      Domain unique identifier
+    </ResponseField>
+    
+    <ResponseField name="hostname" type="string">
+      Custom domain hostname
+    </ResponseField>
+    
+    <ResponseField name="verificationStatus" type="enum">
+      One of: `"PENDING"`, `"VERIFIED"`, `"FAILED"`
+    </ResponseField>
+    
+    <ResponseField name="verifiedAt" type="date | null">
+      When the domain was verified
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="date">
+      Creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="updatedAt" type="date">
+      Last update timestamp
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="createdAt" type="date">
+  When the status page was created
+</ResponseField>
+
+<ResponseField name="updatedAt" type="date">
+  Last update timestamp
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const statusPage = await trpc.statusPage.create.mutate({
+  name: "My Services Status",
+  slug: "my-services",
+  monitorIds: ["clx123", "clx456"],
+  isPublished: true
+});
+
+console.log(`Status page ID: ${statusPage.id}`);
+```
+
+```json Response
+{
+  "id": "clx1234567890",
+  "name": "My Services Status",
+  "slug": "my-services",
+  "isPublished": true,
+  "userId": "clx0987654321",
+  "monitorCount": 2,
+  "domain": null,
+  "createdAt": "2024-03-15T10:30:00.000Z",
+  "updatedAt": "2024-03-15T10:30:00.000Z"
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `BAD_REQUEST` - One or more monitor IDs are invalid or don't belong to the user
+- `CONFLICT` - Slug already exists
+
+---
+
+## update
+
+Update an existing status page.
+
+### Input Parameters
+
+<ParamField path="id" type="string" required>
+  Status page ID to update
+</ParamField>
+
+<ParamField path="name" type="string">
+  New display name (1-120 characters)
+</ParamField>
+
+<ParamField path="slug" type="string">
+  New URL slug (2-63 characters)
+</ParamField>
+
+<ParamField path="monitorIds" type="array">
+  New array of website IDs (1-100 monitors). Replaces existing monitors.
+</ParamField>
+
+<ParamField path="isPublished" type="boolean">
+  Update publication status
+</ParamField>
+
+### Response
+
+Returns the updated status page object (same structure as `create`).
+
+<CodeGroup>
+```typescript TypeScript
+const statusPage = await trpc.statusPage.update.mutate({
+  id: "clx1234567890",
+  name: "Updated Status Page",
+  isPublished: false
+});
+```
+
+```json Response
+{
+  "id": "clx1234567890",
+  "name": "Updated Status Page",
+  "slug": "my-services",
+  "isPublished": false,
+  "userId": "clx0987654321",
+  "monitorCount": 2,
+  "domain": null,
+  "createdAt": "2024-03-15T10:30:00.000Z",
+  "updatedAt": "2024-03-15T12:00:00.000Z"
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `NOT_FOUND` - Status page not found or doesn't belong to user
+- `BAD_REQUEST` - One or more monitor IDs are invalid
+- `CONFLICT` - New slug already exists
+
+---
+
+## list
+
+Get all status pages for the authenticated user.
+
+### Response
+
+<ResponseField name="statusPages" type="array">
+  Array of status page objects (same structure as `create`)
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.statusPage.list.query();
+
+console.log(`Total status pages: ${result.statusPages.length}`);
+result.statusPages.forEach(page => {
+  console.log(`${page.name} (${page.monitorCount} monitors)`);
+});
+```
+
+```json Response
+{
+  "statusPages": [
+    {
+      "id": "clx1234567890",
+      "name": "My Services Status",
+      "slug": "my-services",
+      "isPublished": true,
+      "userId": "clx0987654321",
+      "monitorCount": 2,
+      "domain": null,
+      "createdAt": "2024-03-15T10:30:00.000Z",
+      "updatedAt": "2024-03-15T10:30:00.000Z"
+    }
+  ]
+}
+```
+</CodeGroup>
+
+---
+
+## delete
+
+Permanently delete a status page.
+
+### Input Parameters
+
+<ParamField path="id" type="string" required>
+  Status page ID to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean">
+  Always returns `true` on success
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.statusPage.delete.mutate({
+  id: "clx1234567890"
+});
+
+console.log(result.success); // true
+```
+
+```json Response
+{
+  "success": true
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `NOT_FOUND` - Status page not found or doesn't belong to user
+
+---
+
+## publicByHost
+
+Get public status page data by custom domain hostname. This is a public endpoint used to display status pages on custom domains.
+
+<Info>This endpoint does not require authentication and is intended for public access.</Info>
+
+### Input Parameters
+
+<ParamField path="hostname" type="string" required>
+  Custom domain hostname (must start with `status.` and be verified)
+</ParamField>
+
+<ParamField path="viewMode" type="enum" default="per-check">
+  View mode for status data:
+  - `per-check` - Returns up to 90 most recent individual checks
+  - `per-day` - Returns aggregated daily data for last 31 days
+</ParamField>
+
+### Response
+
+<ResponseField name="statusPage" type="object">
+  Public status page data
+  
+  <Expandable title="Status Page Object">
+    <ResponseField name="id" type="string">
+      Status page unique identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Display name
+    </ResponseField>
+    
+    <ResponseField name="slug" type="string">
+      URL slug
+    </ResponseField>
+    
+    <ResponseField name="hostname" type="string">
+      Custom domain hostname
+    </ResponseField>
+    
+    <ResponseField name="websites" type="array">
+      Array of monitored websites with status data (same structure as `website.status` response)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```typescript TypeScript
+const result = await trpc.statusPage.publicByHost.query({
+  hostname: "status.example.com",
+  viewMode: "per-check"
+});
+
+console.log(result.statusPage.name);
+result.statusPage.websites.forEach(site => {
+  console.log(`${site.websiteName}: ${site.currentStatus?.status}`);
+});
+```
+
+```json Response
+{
+  "statusPage": {
+    "id": "clx1234567890",
+    "name": "My Services Status",
+    "slug": "my-services",
+    "hostname": "status.example.com",
+    "websites": [
+      {
+        "websiteId": "clx123",
+        "websiteName": "API Server",
+        "websiteUrl": "https://api.example.com",
+        "statusPoints": [
+          {
+            "status": "UP",
+            "checkedAt": "2024-03-15T12:00:00.000Z",
+            "responseTimeMs": 245,
+            "httpStatusCode": 200
+          }
+        ],
+        "currentStatus": {
+          "status": "UP",
+          "checkedAt": "2024-03-15T12:00:00.000Z",
+          "responseTimeMs": 245,
+          "httpStatusCode": 200,
+          "regionId": "us-east-1"
+        }
+      }
+    ]
+  }
+}
+```
+</CodeGroup>
+
+### Error Codes
+
+- `NOT_FOUND` - Status page not found for the given hostname, domain not verified, or status page not published

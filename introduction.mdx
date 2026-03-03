@@ -1,0 +1,207 @@
+---
+title: "Introduction to Better Uptime"
+description: "A modern uptime monitoring platform built for performance, reliability, and scale"
+---
+
+<img
+  className="block dark:hidden"
+  src="https://github.com/user-attachments/assets/0f6c38ba-9d43-413c-800b-234440edcf8f"
+  alt="Better Uptime Hero"
+/>
+<img
+  className="hidden dark:block"
+  src="https://github.com/user-attachments/assets/0f6c38ba-9d43-413c-800b-234440edcf8f"
+  alt="Better Uptime Hero"
+/>
+
+## What is Better Uptime?
+
+Better Uptime is a self-hosted uptime monitoring platform that helps you track the health and performance of your websites and services. Built with modern technologies and designed for scalability, it provides real-time monitoring, status pages, and comprehensive analytics.
+
+<CardGroup cols={2}>
+  <Card
+    title="Real-time Monitoring"
+    icon="chart-line"
+    href="/features/uptime-monitoring"
+  >
+    Monitor your websites with configurable check intervals and instant notifications
+  </Card>
+  <Card
+    title="Public Status Pages"
+    icon="globe"
+    href="/features/status-pages"
+  >
+    Share your uptime status with customers using beautiful, customizable status pages
+  </Card>
+  <Card
+    title="Custom Domains"
+    icon="link"
+    href="/features/custom-domains"
+  >
+    Host status pages on your own domain for a seamless brand experience
+  </Card>
+  <Card
+    title="Advanced Analytics"
+    icon="chart-bar"
+    href="/architecture/tech-stack"
+  >
+    Time-series data storage with ClickHouse for powerful insights and reporting
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<AccordionGroup>
+  <Accordion icon="clock" title="Automated Website Checks">
+    Better Uptime automatically checks your websites every 3 minutes. The system:
+    - Publishes website checks to Redis streams
+    - Distributes work across multiple worker instances
+    - Records response times and HTTP status codes
+    - Tracks uptime/downtime with millisecond precision
+  </Accordion>
+
+  <Accordion icon="bolt" title="High Performance Architecture">
+    Built on a modern tech stack designed for reliability:
+    - **tRPC** for type-safe API communication
+    - **Redis Streams** for distributed job processing
+    - **ClickHouse** for time-series data storage
+    - **Prisma** for database operations
+    - **Bun** runtime for blazing-fast performance
+  </Accordion>
+
+  <Accordion icon="users" title="Multi-Region Support">
+    Deploy workers in different regions to:
+    - Monitor from multiple geographic locations
+    - Reduce latency for global services
+    - Detect region-specific outages
+    - Scale horizontally with ease
+  </Accordion>
+
+  <Accordion icon="shield-check" title="Reliable Message Processing">
+    The worker system ensures zero data loss:
+    - Consumer groups for distributed processing
+    - Automatic reclaim of stale messages (PEL)
+    - Graceful handling of failures
+    - Client-side timeouts prevent hanging operations
+  </Accordion>
+</AccordionGroup>
+
+## System Architecture
+
+Better Uptime uses a distributed architecture with specialized services:
+
+<img
+  src="https://github.com/user-attachments/assets/41b53477-dc73-497b-ad50-60efa2ffb12f"
+  alt="Better Uptime Architecture"
+/>
+
+<Card
+  title="Explore Full Architecture"
+  icon="diagram-project"
+  href="https://excalidraw.com/#json=10MK6ZkcCFbxAVLMBwLKa,jWBUnZGQSGjJJ1fYNKfwVA"
+>
+  View the detailed architecture diagram on Excalidraw
+</Card>
+
+### Core Components
+
+<Steps>
+  <Step title="Publisher Service">
+    Fetches active websites from the database every 3 minutes and publishes them to Redis streams for processing.
+    
+    ```typescript
+    const websites = await prismaClient.website.findMany({
+      where: { isActive: true },
+      select: { url: true, id: true }
+    });
+    await xAddBulk(websites);
+    ```
+  </Step>
+
+  <Step title="Worker Service">
+    Consumes messages from Redis streams, performs HTTP checks, and stores results in ClickHouse.
+    
+    ```typescript
+    const messages = await xReadGroup({
+      consumerGroup: REGION_ID,
+      workerId: WORKER_ID
+    });
+    // Process checks and record to ClickHouse
+    await recordUptimeEvents(events);
+    ```
+  </Step>
+
+  <Step title="Backend API">
+    Provides tRPC endpoints for managing websites, viewing status, and configuring monitors.
+    
+    ```typescript
+    // Create a new monitor
+    const website = await prismaClient.website.create({
+      data: { url, name, userId, isActive: true }
+    });
+    ```
+  </Step>
+
+  <Step title="Frontend Client">
+    Next.js application for the dashboard and status pages with real-time updates.
+  </Step>
+</Steps>
+
+## Tech Stack
+
+<CardGroup cols={3}>
+  <Card title="Backend" icon="server">
+    - **tRPC** - Type-safe APIs
+    - **Prisma** - Database ORM
+    - **Zod** - Schema validation
+  </Card>
+  <Card title="Data Layer" icon="database">
+    - **PostgreSQL** - Primary database
+    - **ClickHouse** - Time-series data
+    - **Redis** - Message streams
+  </Card>
+  <Card title="Frontend" icon="window">
+    - **Next.js** - React framework
+    - **Turborepo** - Monorepo tool
+    - **Bun** - JavaScript runtime
+  </Card>
+</CardGroup>
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card
+    title="Get Started"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Set up Better Uptime in minutes with Docker
+  </Card>
+  <Card
+    title="Architecture Guide"
+    icon="sitemap"
+    href="/architecture/overview"
+  >
+    Understand how the system works under the hood
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/introduction"
+  >
+    Integrate with the tRPC API programmatically
+  </Card>
+  <Card
+    title="Deployment Guide"
+    icon="cloud"
+    href="/deployment/docker-production"
+  >
+    Deploy to production with best practices
+  </Card>
+</CardGroup>
+
+<Note>
+  **Try the Demo**: Use the test credentials to explore a live instance:
+  - Email: `dummy.samaltman@gmail.com`
+  - Password: `ClaudeBetter<3`
+</Note>

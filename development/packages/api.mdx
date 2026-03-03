@@ -1,0 +1,186 @@
+---
+title: '@repo/api'
+description: 'tRPC routers and procedures for Better Uptime API'
+---
+
+The `@repo/api` package contains all tRPC routers, procedures, and context creation for the Better Uptime application.
+
+## Overview
+
+This package exports:
+- tRPC router utilities (`router`, procedures, context)
+- Domain-specific routers (user, website, status page)
+- Type utilities for inputs/outputs
+
+## Exports
+
+From `packages/api/src/index.ts`:
+
+```typescript
+// tRPC utilities
+export {
+  router,
+  publicProcedure,
+  protectedProcedure,
+  createContext,
+} from "./trpc.js";
+export type { Context } from "./trpc.js";
+
+// Routers
+export { userRouter } from "./routes/user.js";
+export { websiteRouter } from "./routes/website.js";
+export { statusPageRouter } from "./routes/status-page.js";
+export { statusDomainRouter } from "./routes/status-domain.js";
+
+// Type utilities
+export type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
+```
+
+## Creating Routers
+
+Use the exported `router` function to create new routers:
+
+```typescript
+import { router, protectedProcedure } from "@repo/api";
+
+const myRouter = router({
+  myProcedure: protectedProcedure.query(async ({ ctx }) => {
+    // ctx.user is guaranteed to exist
+    return { userId: ctx.user.userId };
+  }),
+});
+```
+
+## Context
+
+The tRPC context includes authentication information:
+
+```typescript packages/api/src/trpc.ts
+export interface Context {
+  user: { userId: string } | null;
+}
+
+export function createContext(opts: CreateHTTPContextOptions): Context {
+  const authHeader = opts.req.headers.authorization;
+  
+  if (!authHeader?.startsWith("Bearer ")) {
+    return { user: null };
+  }
+  
+  const token = authHeader.slice(7);
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+    return { user: decoded };
+  } catch {
+    return { user: null };
+  }
+}
+```
+
+## Procedures
+
+### publicProcedure
+
+Used for endpoints that don't require authentication:
+
+```typescript packages/api/src/routes/user.ts
+userRouter = router({
+  login: publicProcedure
+    .output(userOutputValidation)
+    .input(userInputValidation)
+    .mutation(async (opts) => {
+      const { email, password } = opts.input;
+      // Login logic...
+    }),
+});
+```
+
+### protectedProcedure
+
+Used for endpoints that require authentication. Throws `UNAUTHORIZED` if user is not authenticated:
+
+```typescript packages/api/src/trpc.ts
+export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+  return next({ ctx: { user: ctx.user } });
+});
+```
+
+## Example Router: websiteRouter
+
+The `websiteRouter` demonstrates real usage patterns:
+
+```typescript packages/api/src/routes/website.ts
+export const websiteRouter = router({
+  register: protectedProcedure
+    .output(websiteOutput)
+    .input(createWebsiteInput)
+    .mutation(async (opts) => {
+      const { url, name } = opts.input;
+      const userId = opts.ctx.user.userId;
+      
+      const website = await prismaClient.website.create({
+        data: { url, name: name ?? null, userId, isActive: true },
+      });
+      
+      // Trigger immediate first check
+      await xAddBulk([{ url: website.url, id: website.id }]);
+      
+      return website;
+    }),
+    
+  list: protectedProcedure
+    .output(websiteListOutput)
+    .query(async (opts) => {
+      const websites = await prismaClient.website.findMany({
+        where: { userId: opts.ctx.user.userId, isActive: true },
+        orderBy: { createdAt: "desc" },
+      });
+      return { websites, total: websites.length };
+    }),
+});
+```
+
+## Integration with Other Packages
+
+The API package integrates with:
+
+- **@repo/store** - Prisma client for database operations
+- **@repo/clickhouse** - Querying uptime status events
+- **@repo/streams** - Publishing website checks to Redis
+- **@repo/validators** - Input/output validation schemas
+- **@repo/config** - Environment configuration
+
+## Example: Website Status Endpoint
+
+The `website.status` endpoint demonstrates integration across packages:
+
+```typescript packages/api/src/routes/website.ts
+status: protectedProcedure
+  .input(websiteStatusInput.optional())
+  .output(websiteStatusListOutput)
+  .query(async (opts) => {
+    const userId = opts.ctx.user.userId;
+    
+    // 1. Get websites from Postgres
+    const websites = await prismaClient.website.findMany({
+      where: { userId, isActive: true },
+    });
+    
+    // 2. Query ClickHouse for status events
+    const statusEvents = await getRecentStatusEvents(
+      websites.map(w => w.id),
+      90 // limit
+    );
+    
+    // 3. Combine and return
+    return { websites: /* ... */ };
+  }),
+```
+
+## Location
+
+`packages/api/src/`
