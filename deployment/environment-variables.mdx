@@ -141,6 +141,32 @@ These variables must be set for Better Uptime to function:
   **Production:** Not needed
 </ParamField>
 
+<ParamField path="NEXT_PUBLIC_GITHUB_CLIENT_ID" type="string" optional>
+  GitHub OAuth client ID exposed to the browser
+
+  Automatically set from `CLIENT_ID_GITHUB` by Next.js build process
+
+  <Info>
+    Usually not needed to set manually - Next.js copies from `CLIENT_ID_GITHUB`
+  </Info>
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_API_URL" type="string" optional>
+  Override the tRPC API URL
+
+  Defaults to `NEXT_PUBLIC_BACKEND_URL` if not set
+
+  **Use case:** Custom API routing or proxy configuration
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_API_PROXY_TARGET" type="string" optional>
+  API proxy target for Next.js rewrites
+
+  Used in development to proxy API requests
+
+  **Example:** `http://localhost:8084`
+</ParamField>
+
 ### Worker
 
 <ParamField path="REGION_ID" type="string" default="us-east-1">
@@ -183,6 +209,26 @@ ClickHouse is optional and used for storing uptime check metrics.
 
 <ParamField path="CLICKHOUSE_METRICS_TABLE" type="string" default="uptime_checks">
   Table name for storing uptime check metrics
+</ParamField>
+
+### Status Pages
+
+<ParamField path="STATUS_PAGE_CNAME_TARGET" type="string" optional>
+  CNAME target for custom status page domains
+
+  **Development:** `localhost` (default)
+
+  **Production:** `status.raashed.xyz` (default)
+
+  Override to use your own domain for status pages
+</ParamField>
+
+<ParamField path="STATUS_PAGE_VERIFY_TXT_PREFIX" type="string" default="_uptique-verify">
+  Prefix for TXT verification records
+
+  Used when verifying custom domain ownership
+
+  **Format:** `{prefix}.yourdomain.com`
 </ParamField>
 
 ## Environment Templates
